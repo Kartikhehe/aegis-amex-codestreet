@@ -1,0 +1,130 @@
+rules_version = '2';
+
+// AEGIS Firestore security rules.
+//
+// Two principles decide everything below.
+//
+// 1. CLIENTS NEVER WRITE. Every document in this database is a mirror of a
+//    decision the backend already made and recorded in SQL. A client that could
+//    write here could fabricate governance history, so all writes are denied to
+//    everyone. Only the Admin SDK -- which bypasses these rules by design --
+//    writes, and it only writes what SQL has already committed.
+//
+// 2. READS ARE SCOPED BY ROLE, ENFORCED HERE. The console filters its queries,
+//    but a filter in a client is a request, not a control. These rules are what
+//    actually stops an agent operator from reading another operator's traffic.
+//
+// Role comes from custom claims on the Firebase ID token, set by the backend
+// when a user signs in. A token without a role claim can read nothing.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --- helpers ---------------------------------------------------------
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function role() {
+      return request.auth.token.role;
+    }
+
+    function isOperator() {
+      // Full-privilege console user. Sees the whole fleet.
+      return signedIn() && role() == 'operator';
+    }
+
+    function isAgentOperator() {
+      return signedIn() && role() == 'agent_operator';
+    }
+
+    function isCardMember() {
+      return signedIn() && role() == 'card_member';
+    }
+
+    function myOperatorId() {
+      return request.auth.token.operator_id;
+    }
+
+    function myCardMemberId() {
+      return request.auth.token.card_member_id;
+    }
+
+    // --- decisions -------------------------------------------------------
+    // The single most sensitive collection: it is the spending history of real
+    // people. An agent operator sees only their own agents' decisions; a card
+    // member sees only their own.
+
+    match /decisions/{actionId} {
+      allow read: if isOperator()
+                  || (isAgentOperator() && resource.data.operator_id == myOperatorId())
+                  || (isCardMember() && resource.data.card_member_id == myCardMemberId());
+      allow write: if false;
+    }
+
+    // --- agents ----------------------------------------------------------
+
+    match /agents/{agentId} {
+      allow read: if isOperator()
+                  || (isAgentOperator() && resource.data.operator_id == myOperatorId())
+                  || (isCardMember() && resource.data.card_member_id == myCardMemberId());
+      allow write: if false;
+    }
+
+    // --- incidents -------------------------------------------------------
+    // Breaker trips. Card members do not see these: an incident is an
+    // operational finding about an operator's fleet, not a statement about the
+    // member's own spending.
+
+    match /incidents/{eventId} {
+      allow read: if isOperator()
+                  || (isAgentOperator() && resource.data.operator_id == myOperatorId());
+      allow write: if false;
+    }
+
+    // --- disputes --------------------------------------------------------
+
+    match /disputes/{disputeId} {
+      allow read: if isOperator()
+                  || (isCardMember() && resource.data.card_member_id == myCardMemberId());
+      allow write: if false;
+    }
+
+    // --- reference data --------------------------------------------------
+    // Merchants, operators, policies and fleet state carry no personal data
+    // and are readable by any signed-in console user. Card members have no use
+    // for them and are not granted access, on the principle that a role should
+    // hold the narrowest set of permissions that lets it work.
+
+    match /merchants/{merchantId} {
+      allow read: if isOperator() || isAgentOperator();
+      allow write: if false;
+    }
+
+    match /operators/{operatorId} {
+      allow read: if isOperator() || isAgentOperator();
+      allow write: if false;
+    }
+
+    match /policies/{policyId} {
+      allow read: if isOperator() || isAgentOperator();
+      allow write: if false;
+    }
+
+    match /fleet_state/{docId} {
+      // Everyone signed in may see whether the fleet is stopped -- a card
+      // member whose purchase was just denied deserves to know why.
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    // --- default deny ----------------------------------------------------
+    // Anything not matched above is unreachable. New collections must opt in
+    // explicitly rather than inherit access by accident.
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

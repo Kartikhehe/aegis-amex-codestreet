@@ -1,0 +1,69 @@
+name: aegis
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: aegis-postgres
+    environment:
+      POSTGRES_USER: aegis
+      POSTGRES_PASSWORD: aegis
+      POSTGRES_DB: aegis
+    ports:
+      - "5432:5432"
+    volumes:
+      - aegis-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # The service waits for this: migrations against a half-open Postgres
+      # fail in confusing ways.
+      test: ["CMD-SHELL", "pg_isready -U aegis -d aegis"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7
+    container_name: aegis-redis
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  aegis:
+    build:
+      context: ../services/aegis
+      dockerfile: Dockerfile
+    container_name: aegis-service
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://aegis:aegis@postgres:5432/aegis
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:-aegis-development-secret-do-not-use-in-production-0000}
+      # Scoring: live when a key is present, otherwise replay from the frozen
+      # fixture so the stack still comes up fully populated offline.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      AEGIS_SCORER_MODEL: ${AEGIS_SCORER_MODEL:-gpt-4.1-mini}
+      AEGIS_SCORER_MODE: ${AEGIS_SCORER_MODE:-auto}
+      # The ledger tamper endpoint. Off unless explicitly enabled for a demo.
+      AEGIS_ENABLE_DEMO: ${AEGIS_ENABLE_DEMO:-false}
+      AEGIS_CORS_ORIGINS: ${AEGIS_CORS_ORIGINS:-http://localhost:5002,http://localhost:5003}
+      AEGIS_SEED_ON_BOOT: ${AEGIS_SEED_ON_BOOT:-true}
+      AEGIS_SEED_ACTIONS: ${AEGIS_SEED_ACTIONS:-25000}
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 90s
+
+volumes:
+  aegis-pgdata:

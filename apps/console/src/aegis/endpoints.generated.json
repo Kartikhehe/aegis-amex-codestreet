@@ -1,0 +1,328 @@
+{
+  "generatedAt": "2026-08-08T18:14:40.677Z",
+  "title": "AEGIS",
+  "version": "1.0.0",
+  "operationCount": 32,
+  "operations": [
+    {
+      "path": "/api/agents",
+      "clientPath": "/agents",
+      "method": "GET",
+      "operationId": "list_agents_api_agents_get",
+      "summary": "List Agents",
+      "tags": [
+        "agents"
+      ]
+    },
+    {
+      "path": "/api/agents",
+      "clientPath": "/agents",
+      "method": "POST",
+      "operationId": "create_agent_api_agents_post",
+      "summary": "Create Agent",
+      "tags": [
+        "agents"
+      ]
+    },
+    {
+      "path": "/api/agents/{agent_id}",
+      "clientPath": "/agents/{agent_id}",
+      "method": "GET",
+      "operationId": "get_agent_api_agents__agent_id__get",
+      "summary": "Get Agent",
+      "tags": [
+        "agents"
+      ]
+    },
+    {
+      "path": "/api/agents/{agent_id}/can-issue",
+      "clientPath": "/agents/{agent_id}/can-issue",
+      "method": "GET",
+      "operationId": "check_issuance_api_agents__agent_id__can_issue_get",
+      "summary": "Dry-run a sub-agent mandate against its parent",
+      "tags": [
+        "agents"
+      ]
+    },
+    {
+      "path": "/api/agents/{agent_id}/revoke",
+      "clientPath": "/agents/{agent_id}/revoke",
+      "method": "POST",
+      "operationId": "revoke_api_agents__agent_id__revoke_post",
+      "summary": "Revoke",
+      "tags": [
+        "agents"
+      ]
+    },
+    {
+      "path": "/api/agents/{agent_id}/suspend",
+      "clientPath": "/agents/{agent_id}/suspend",
+      "method": "POST",
+      "operationId": "suspend_api_agents__agent_id__suspend_post",
+      "summary": "Suspend",
+      "tags": [
+        "agents"
+      ]
+    },
+    {
+      "path": "/api/auth/login",
+      "clientPath": "/auth/login",
+      "method": "POST",
+      "operationId": "login_api_auth_login_post",
+      "summary": "Login",
+      "tags": [
+        "auth"
+      ]
+    },
+    {
+      "path": "/api/auth/logout",
+      "clientPath": "/auth/logout",
+      "method": "POST",
+      "operationId": "logout_api_auth_logout_post",
+      "summary": "Logout",
+      "tags": [
+        "auth"
+      ]
+    },
+    {
+      "path": "/api/auth/profile",
+      "clientPath": "/auth/profile",
+      "method": "GET",
+      "operationId": "profile_api_auth_profile_get",
+      "summary": "Profile",
+      "tags": [
+        "auth"
+      ]
+    },
+    {
+      "path": "/api/decide",
+      "clientPath": "/decide",
+      "method": "POST",
+      "operationId": "decide_api_decide_post",
+      "summary": "Decide",
+      "tags": [
+        "decide"
+      ]
+    },
+    {
+      "path": "/api/decisions",
+      "clientPath": "/decisions",
+      "method": "GET",
+      "operationId": "list_decisions_api_decisions_get",
+      "summary": "List Decisions",
+      "tags": [
+        "decide"
+      ]
+    },
+    {
+      "path": "/api/decisions/{action_id}",
+      "clientPath": "/decisions/{action_id}",
+      "method": "GET",
+      "operationId": "get_decision_api_decisions__action_id__get",
+      "summary": "Get Decision",
+      "tags": [
+        "decide"
+      ]
+    },
+    {
+      "path": "/api/decisions/{action_id}/resolve",
+      "clientPath": "/decisions/{action_id}/resolve",
+      "method": "POST",
+      "operationId": "resolve_step_up_api_decisions__action_id__resolve_post",
+      "summary": "Resolve Step Up",
+      "tags": [
+        "decide"
+      ]
+    },
+    {
+      "path": "/api/demo/restore",
+      "clientPath": "/demo/restore",
+      "method": "POST",
+      "operationId": "restore_api_demo_restore_post",
+      "summary": "DEMO ONLY: rebuild the chain after a tamper",
+      "tags": [
+        "demo"
+      ]
+    },
+    {
+      "path": "/api/demo/tamper",
+      "clientPath": "/demo/tamper",
+      "method": "POST",
+      "operationId": "tamper_api_demo_tamper_post",
+      "summary": "DEMO ONLY: corrupt a ledger record",
+      "tags": [
+        "demo"
+      ]
+    },
+    {
+      "path": "/api/disputes",
+      "clientPath": "/disputes",
+      "method": "GET",
+      "operationId": "list_disputes_api_disputes_get",
+      "summary": "List Disputes",
+      "tags": [
+        "disputes"
+      ]
+    },
+    {
+      "path": "/api/disputes",
+      "clientPath": "/disputes",
+      "method": "POST",
+      "operationId": "open_dispute_api_disputes_post",
+      "summary": "Open Dispute",
+      "tags": [
+        "disputes"
+      ]
+    },
+    {
+      "path": "/api/disputes/{dispute_id}/packet",
+      "clientPath": "/disputes/{dispute_id}/packet",
+      "method": "POST",
+      "operationId": "build_packet_api_disputes__dispute_id__packet_post",
+      "summary": "Build Packet",
+      "tags": [
+        "disputes"
+      ]
+    },
+    {
+      "path": "/api/fleet/rearm",
+      "clientPath": "/fleet/rearm",
+      "method": "POST",
+      "operationId": "fleet_rearm_api_fleet_rearm_post",
+      "summary": "Fleet Rearm",
+      "tags": [
+        "fleet"
+      ]
+    },
+    {
+      "path": "/api/fleet/state",
+      "clientPath": "/fleet/state",
+      "method": "GET",
+      "operationId": "fleet_state_api_fleet_state_get",
+      "summary": "Fleet State",
+      "tags": [
+        "fleet"
+      ]
+    },
+    {
+      "path": "/api/fleet/stop",
+      "clientPath": "/fleet/stop",
+      "method": "POST",
+      "operationId": "fleet_stop_api_fleet_stop_post",
+      "summary": "Fleet Stop",
+      "tags": [
+        "fleet"
+      ]
+    },
+    {
+      "path": "/api/incidents",
+      "clientPath": "/incidents",
+      "method": "GET",
+      "operationId": "list_incidents_api_incidents_get",
+      "summary": "List Incidents",
+      "tags": [
+        "incidents"
+      ]
+    },
+    {
+      "path": "/api/ledger",
+      "clientPath": "/ledger",
+      "method": "GET",
+      "operationId": "list_ledger_api_ledger_get",
+      "summary": "List Ledger",
+      "tags": [
+        "ledger"
+      ]
+    },
+    {
+      "path": "/api/merchants",
+      "clientPath": "/merchants",
+      "method": "GET",
+      "operationId": "list_merchants_api_merchants_get",
+      "summary": "List Merchants",
+      "tags": [
+        "reference"
+      ]
+    },
+    {
+      "path": "/api/operators",
+      "clientPath": "/operators",
+      "method": "GET",
+      "operationId": "list_operators_api_operators_get",
+      "summary": "List Operators",
+      "tags": [
+        "reference"
+      ]
+    },
+    {
+      "path": "/api/overview",
+      "clientPath": "/overview",
+      "method": "GET",
+      "operationId": "overview_api_overview_get",
+      "summary": "Overview",
+      "tags": [
+        "fleet"
+      ]
+    },
+    {
+      "path": "/api/policies",
+      "clientPath": "/policies",
+      "method": "GET",
+      "operationId": "list_policies_api_policies_get",
+      "summary": "List Policies",
+      "tags": [
+        "policy"
+      ]
+    },
+    {
+      "path": "/api/policy",
+      "clientPath": "/policy",
+      "method": "POST",
+      "operationId": "create_policy_api_policy_post",
+      "summary": "Create Policy",
+      "tags": [
+        "policy"
+      ]
+    },
+    {
+      "path": "/api/policy/promote",
+      "clientPath": "/policy/promote",
+      "method": "POST",
+      "operationId": "promote_api_policy_promote_post",
+      "summary": "Promote",
+      "tags": [
+        "policy"
+      ]
+    },
+    {
+      "path": "/api/policy/simulate",
+      "clientPath": "/policy/simulate",
+      "method": "POST",
+      "operationId": "simulate_api_policy_simulate_post",
+      "summary": "Simulate",
+      "tags": [
+        "policy"
+      ]
+    },
+    {
+      "path": "/api/verify",
+      "clientPath": "/verify",
+      "method": "GET",
+      "operationId": "verify_api_verify_get",
+      "summary": "Verify",
+      "tags": [
+        "ledger"
+      ]
+    },
+    {
+      "path": "/health",
+      "clientPath": "/health",
+      "method": "GET",
+      "operationId": "health_health_get",
+      "summary": "Health",
+      "tags": [
+        "reference"
+      ]
+    }
+  ]
+}

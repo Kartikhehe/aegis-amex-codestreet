@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+.venv/
+__pycache__/
+*.py[cod]
+
+# Build output
+dist/
+build/
+*.egg-info/
+
+# The demo database. 224 MB of generated data that `aegis.sh seed`
+# reproduces exactly from a fixed random seed -- committing it would bloat
+# the repository to no purpose.
+*.db
+*.db-journal
+
+# Runtime
+.logs/
+*.log
+
+# Secrets. Never commit a real key.
+.env.local
+.env.*.local
+
+# Firebase service-account keys. These ARE secret -- unlike the web API key in
+# apps/*/.env, which only identifies the project and is governed by security
+# rules, a service-account key grants full Admin SDK access and bypasses rules.
+serviceAccountKey.json
+*serviceAccount*.json
+*firebase*adminsdk*.json
+.firebase/
+firebase-debug.log
+
+# OS
+.DS_Store
+
+# Vercel CLI link state — machine-local, contains project/org ids.
+.vercel/
+
+# The unmodified Aurora template. apps/console was seeded FROM it and has
+# diverged completely; keeping the original 4 variants (3,700 files) in the
+# repository would triple its size and confuse what is actually ours.
+# Keep the archive locally if you want the reference.
+Aurora-JavaScript-v1.7.0/

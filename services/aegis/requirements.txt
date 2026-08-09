@@ -1,0 +1,16 @@
+# Lower bounds with compatible-release ceilings. Pinned exactly in the
+# Docker image via pip freeze; left flexible here so the service builds on
+# 3.11 through 3.14.
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.34,<1.0
+pydantic>=2.10,<3.0
+sqlalchemy>=2.0.36,<2.1
+alembic>=1.14,<2.0
+psycopg[binary]>=3.2.10,<4.0
+redis>=5.2,<7.0
+openai>=1.59,<3.0
+pyjwt>=2.10,<3.0
+bcrypt>=4.1,<6.0
+python-multipart>=0.0.20
+httpx>=0.28,<1.0
+firebase-admin>=6.5,<8.0
