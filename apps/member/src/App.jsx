@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AppBar,
   Box,
@@ -12,12 +12,13 @@ import {
   Toolbar,
   Typography,
   useColorScheme,
-} from '@mui/material';
-import axios from 'axios';
-import AgentAuthorityCard from './components/AgentAuthorityCard';
-import BlockedCard from './components/BlockedCard';
-import StepUpCard from './components/StepUpCard';
-import endpoints from './aegis/api';
+} from "@mui/material";
+import axios from "axios";
+import AgentAuthorityCard from "./components/AgentAuthorityCard";
+import Logo from "./components/Logo";
+import BlockedCard from "./components/BlockedCard";
+import StepUpCard from "./components/StepUpCard";
+import endpoints from "./aegis/api";
 
 /**
  * The card member surface.
@@ -33,36 +34,40 @@ import endpoints from './aegis/api';
  */
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000/api',
+  baseURL: import.meta.env.VITE_API_URL || "http://localhost:8000/api",
 });
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('aegis_member_token');
+  const token = localStorage.getItem("aegis_member_token");
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
 
 api.interceptors.response.use(
   (response) => response.data,
-  (error) => Promise.reject({ status: error.response?.status, data: error.response?.data }),
+  (error) =>
+    Promise.reject({
+      status: error.response?.status,
+      data: error.response?.data,
+    }),
 );
 
 const Login = ({ onSignedIn }) => {
-  const [email, setEmail] = useState('member@aegis.test');
-  const [password, setPassword] = useState('password123');
-  const [error, setError] = useState('');
+  const [email, setEmail] = useState("member@aegis.test");
+  const [password, setPassword] = useState("password123");
+  const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
   const submit = async (event) => {
     event.preventDefault();
     setBusy(true);
-    setError('');
+    setError("");
     try {
       const result = await api.post(endpoints.login, { email, password });
-      localStorage.setItem('aegis_member_token', result.token);
+      localStorage.setItem("aegis_member_token", result.token);
       onSignedIn(result.user);
     } catch (err) {
-      setError(err?.data?.detail ?? 'Could not sign in.');
+      setError(err?.data?.detail ?? "Could not sign in.");
     } finally {
       setBusy(false);
     }
@@ -71,11 +76,14 @@ const Login = ({ onSignedIn }) => {
   return (
     <Container maxWidth="sm" sx={{ pt: 8 }}>
       <Stack spacing={3} component="form" onSubmit={submit}>
+        {/* On a bare page the lockup's opaque background would read as a
+            stray box, so it is given deliberate padding and framing instead. */}
+        <Logo height={44} sx={{ p: 1.5, alignSelf: "flex-start" }} />
         <Stack spacing={1}>
           <Typography variant="h5" sx={{ fontWeight: 800 }}>
             Your card, your rules
           </Typography>
-          <Typography variant="body1" sx={{ color: 'text.secondary' }}>
+          <Typography variant="body1" sx={{ color: "text.secondary" }}>
             Sign in to review what your agents are allowed to spend.
           </Typography>
         </Stack>
@@ -96,13 +104,13 @@ const Login = ({ onSignedIn }) => {
         />
 
         {error && (
-          <Typography variant="body2" sx={{ color: 'error.main' }}>
+          <Typography variant="body2" sx={{ color: "error.main" }}>
             {error}
           </Typography>
         )}
 
         <Button type="submit" size="large" variant="contained" disabled={busy}>
-          {busy ? 'Signing in…' : 'Sign in'}
+          {busy ? "Signing in…" : "Sign in"}
         </Button>
       </Stack>
     </Container>
@@ -110,11 +118,15 @@ const Login = ({ onSignedIn }) => {
 };
 
 const EmptyMessage = ({ title, body }) => (
-  <Stack spacing={1} alignItems="center" sx={{ py: 8, px: 3, textAlign: 'center' }}>
+  <Stack
+    spacing={1}
+    alignItems="center"
+    sx={{ py: 8, px: 3, textAlign: "center" }}
+  >
     <Typography variant="h6" sx={{ fontWeight: 700 }}>
       {title}
     </Typography>
-    <Typography variant="body1" sx={{ color: 'text.secondary' }}>
+    <Typography variant="body1" sx={{ color: "text.secondary" }}>
       {body}
     </Typography>
   </Stack>
@@ -131,7 +143,7 @@ const App = () => {
   const signedIn = Boolean(user);
 
   const load = useCallback(async () => {
-    if (!localStorage.getItem('aegis_member_token')) return;
+    if (!localStorage.getItem("aegis_member_token")) return;
     try {
       const [decisionPage, agentList] = await Promise.all([
         api.get(endpoints.decisions, { params: { limit: 50 } }),
@@ -141,13 +153,13 @@ const App = () => {
       setAgents(agentList ?? []);
     } catch {
       // A stale token is the usual cause; drop it and show the sign-in screen.
-      localStorage.removeItem('aegis_member_token');
+      localStorage.removeItem("aegis_member_token");
       setUser(null);
     }
   }, []);
 
   useEffect(() => {
-    const token = localStorage.getItem('aegis_member_token');
+    const token = localStorage.getItem("aegis_member_token");
     if (!token) return;
     api
       .get(endpoints.profile)
@@ -155,19 +167,27 @@ const App = () => {
         setUser(profile);
         load();
       })
-      .catch(() => localStorage.removeItem('aegis_member_token'));
+      .catch(() => localStorage.removeItem("aegis_member_token"));
   }, [load]);
 
   const pending = useMemo(
-    () => decisions.filter((d) => d.verdict === 'STEP_UP' && d.step_up_state === 'pending'),
+    () =>
+      decisions.filter(
+        (d) => d.verdict === "STEP_UP" && d.step_up_state === "pending",
+      ),
     [decisions],
   );
-  const blocked = useMemo(() => decisions.filter((d) => d.verdict === 'DENY').slice(0, 12), [decisions]);
+  const blocked = useMemo(
+    () => decisions.filter((d) => d.verdict === "DENY").slice(0, 12),
+    [decisions],
+  );
 
   const resolve = async (decision, choice) => {
     setBusy(true);
     try {
-      await api.post(endpoints.resolveStepUp(decision.action_id), { decision: choice });
+      await api.post(endpoints.resolveStepUp(decision.action_id), {
+        decision: choice,
+      });
       await load();
     } finally {
       setBusy(false);
@@ -179,7 +199,7 @@ const App = () => {
     try {
       await api.post(endpoints.disputes, {
         action_id: decision.action_id,
-        reason: 'Reported from the card member app',
+        reason: "Reported from the card member app",
       });
     } finally {
       setBusy(false);
@@ -208,59 +228,42 @@ const App = () => {
   }
 
   return (
-    <Box sx={{ pb: 10, minHeight: '100vh', bgcolor: 'background.default' }}>
+    <Box sx={{ pb: 10, minHeight: "100vh", bgcolor: "background.default" }}>
       <AppBar position="sticky" color="transparent" elevation={0}>
         <Toolbar
           sx={(theme) => ({
-            borderBottom: '1px solid',
+            borderBottom: "1px solid",
             borderColor: theme.vars.palette.divider,
             backgroundColor: theme.vars.palette.background.paper,
           })}
         >
-          {/* The AEGIS shield: the member should recognise whose control
-              surface this is at a glance. */}
-          <Box
-            component="svg"
-            viewBox="0 0 24 26"
-            sx={{ width: 22, height: 24, mr: 1.5, flexShrink: 0 }}
-            aria-hidden
-          >
-            <path
-              d="M12 1.5 21.5 5v8.2c0 5.3-3.8 9.4-9.5 11.3C6.3 22.6 2.5 18.5 2.5 13.2V5L12 1.5Z"
-              fill="var(--aegis-palette-primary-main)"
-              fillOpacity="0.18"
-              stroke="var(--aegis-palette-primary-main)"
-              strokeWidth="1.6"
-              strokeLinejoin="round"
-            />
-            <path
-              d="m7.8 12.6 3 3 5.4-5.6"
-              fill="none"
-              stroke="var(--aegis-palette-primary-main)"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </Box>
+          {/* The AEGIS mark. Shield only: the wordmark would crowd out the
+              member's own name, which is what this bar is actually for. */}
+          <Logo variant="mark" height={28} sx={{ mr: 1.25 }} />
 
           <Stack sx={{ flex: 1, minWidth: 0 }}>
-            <Typography variant="subtitle1" sx={{ fontWeight: 700, lineHeight: 1.2 }}>
+            <Typography
+              variant="subtitle1"
+              sx={{ fontWeight: 700, lineHeight: 1.2 }}
+            >
               {user.name}
             </Typography>
-            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+            <Typography variant="caption" sx={{ color: "text.secondary" }}>
               {pending.length > 0
                 ? `${pending.length} waiting for you`
-                : 'Nothing needs your attention'}
+                : "Nothing needs your attention"}
             </Typography>
           </Stack>
 
           <IconButton
-            onClick={() => setMode(mode === 'dark' ? 'light' : 'dark')}
-            aria-label={mode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-            sx={{ color: 'text.secondary' }}
+            onClick={() => setMode(mode === "dark" ? "light" : "dark")}
+            aria-label={
+              mode === "dark" ? "Switch to light mode" : "Switch to dark mode"
+            }
+            sx={{ color: "text.secondary" }}
           >
             <Box component="span" sx={{ fontSize: 20, lineHeight: 1 }}>
-              {mode === 'dark' ? '☀' : '☾'}
+              {mode === "dark" ? "☀" : "☾"}
             </Box>
           </IconButton>
         </Toolbar>
@@ -271,11 +274,13 @@ const App = () => {
           variant="fullWidth"
           sx={(theme) => ({
             backgroundColor: theme.vars.palette.background.paper,
-            borderBottom: '1px solid',
+            borderBottom: "1px solid",
             borderColor: theme.vars.palette.divider,
           })}
         >
-          <Tab label={`Approvals${pending.length ? ` (${pending.length})` : ''}`} />
+          <Tab
+            label={`Approvals${pending.length ? ` (${pending.length})` : ""}`}
+          />
           <Tab label="Blocked" />
           <Tab label="Agents" />
         </Tabs>

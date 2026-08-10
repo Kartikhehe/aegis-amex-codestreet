@@ -33,7 +33,17 @@ const SidenavDrawerContent = ({ variant = 'permanent' }) => {
 
   return (
     <>
-      <Toolbar variant={sidenavAppbarVariant} sx={{ display: 'block', px: { xs: 0 } }}>
+      <Toolbar
+        variant={sidenavAppbarVariant}
+        sx={(theme) => ({
+          display: 'block',
+          px: { xs: 0 },
+          // The lockup artwork has an opaque background; matching it here turns
+          // the logo area into one continuous band instead of a pasted-on box.
+          backgroundColor: '#FFFFFF',
+          ...theme.applyStyles('dark', { backgroundColor: 'rgb(0, 12, 46)' }),
+        })}
+      >
         <Box
           sx={[
             {

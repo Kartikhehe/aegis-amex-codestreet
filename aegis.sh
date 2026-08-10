@@ -31,6 +31,16 @@ export DATABASE_URL="${DATABASE_URL:-sqlite:///$ROOT/services/aegis/dev.db}"
 # MUST stay false in production.
 export AEGIS_ENABLE_DEMO="${AEGIS_ENABLE_DEMO:-true}"
 
+# Firestore mirror (project aegis-6f60f). Turns itself on only when the
+# service-account key is actually present, so a fresh clone without the key
+# still starts and runs on REST.
+AEGIS_SA_KEY="$ROOT/services/aegis/serviceAccountKey.json"
+if [ -f "$AEGIS_SA_KEY" ]; then
+  export FIREBASE_ENABLED="${FIREBASE_ENABLED:-true}"
+  export FIREBASE_PROJECT_ID="${FIREBASE_PROJECT_ID:-aegis-6f60f}"
+  export GOOGLE_APPLICATION_CREDENTIALS="${GOOGLE_APPLICATION_CREDENTIALS:-$AEGIS_SA_KEY}"
+fi
+
 green() { printf "\033[32m%s\033[0m\n" "$1"; }
 red()   { printf "\033[31m%s\033[0m\n" "$1"; }
 dim()   { printf "\033[2m%s\033[0m\n" "$1"; }
