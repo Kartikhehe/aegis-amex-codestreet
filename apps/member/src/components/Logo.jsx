@@ -13,7 +13,7 @@ import { Box, useColorScheme } from "@mui/material";
  * would crowd out the member's own name. Scaling the full lockup down instead
  * would make the tagline illegible on a phone.
  */
-const Logo = ({ variant = "full", height = 30, sx }) => {
+const Logo = ({ variant = "full", height = 40, sx }) => {
   const { mode, systemMode } = useColorScheme();
   const isDark = mode === "system" ? systemMode === "dark" : mode === "dark";
   const src = isDark ? "/AEGIS_lockup_dark.png" : "/AEGIS_lockup_light.png";

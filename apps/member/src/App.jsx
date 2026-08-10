@@ -78,7 +78,7 @@ const Login = ({ onSignedIn }) => {
       <Stack spacing={3} component="form" onSubmit={submit}>
         {/* On a bare page the lockup's opaque background would read as a
             stray box, so it is given deliberate padding and framing instead. */}
-        <Logo height={44} sx={{ p: 1.5, alignSelf: "flex-start" }} />
+        <Logo height={60} sx={{ p: 1.5, alignSelf: "flex-start" }} />
         <Stack spacing={1}>
           <Typography variant="h5" sx={{ fontWeight: 800 }}>
             Your card, your rules
@@ -239,7 +239,7 @@ const App = () => {
         >
           {/* The AEGIS mark. Shield only: the wordmark would crowd out the
               member's own name, which is what this bar is actually for. */}
-          <Logo variant="mark" height={28} sx={{ mr: 1.25 }} />
+          <Logo variant="mark" height={36} sx={{ mr: 1.25 }} />
 
           <Stack sx={{ flex: 1, minWidth: 0 }}>
             <Typography

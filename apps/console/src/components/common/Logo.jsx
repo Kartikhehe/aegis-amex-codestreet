@@ -20,7 +20,7 @@ import paths from 'routes/paths';
  * is cropped to the shield with a fixed-width window. Scaling the whole lockup
  * down instead would render the tagline at two illegible pixels.
  */
-const Logo = ({ showName = true, height = 30, sx, ...rest }) => {
+const Logo = ({ showName = true, height = 40, sx, ...rest }) => {
   const { isDark } = useThemeMode();
   const src = isDark ? '/AEGIS_lockup_dark.png' : '/AEGIS_lockup_light.png';
 
