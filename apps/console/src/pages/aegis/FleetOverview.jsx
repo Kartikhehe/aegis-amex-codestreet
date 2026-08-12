@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Box, Grid, Paper, Stack, Typography } from '@mui/material';
+import { Alert, Box, Grid, Paper, Stack, Typography } from '@mui/material';
 import BlockRateChart from 'aegis/charts/BlockRateChart';
 import ExposureChart from 'aegis/charts/ExposureChart';
 import DecisionDrawer from 'aegis/components/DecisionDrawer';
@@ -96,6 +96,14 @@ const FleetOverview = () => {
   const decisions = decisionPage?.items ?? [];
   const tiles = overview?.tiles ?? [];
 
+  // Four zero tiles are ambiguous: they read identically whether nothing
+  // happened in the window or the screen is broken. When the tiles are empty
+  // but the ledger clearly holds decisions, say which of the two it is --
+  // otherwise an operator is left guessing at their own dashboard.
+  const windowEmpty = tiles.length > 0 && tiles.every((tile) => !tile.value);
+  const ledgerHasHistory = (decisionPage?.total ?? 0) > 0;
+  const staleWindow = windowEmpty && ledgerHasHistory;
+
   return (
     <>
       <PageHeader
@@ -114,6 +122,14 @@ const FleetOverview = () => {
           )
         }
       />
+
+      {staleWindow && (
+        <Alert severity="info" variant="outlined" sx={{ mb: { xs: 2, md: 3 } }}>
+          No decisions in the last 24 hours. The ledger holds{' '}
+          <Mono variant="monoCaption">{decisionPage.total.toLocaleString('en-IN')}</Mono> older
+          records — the tiles below measure a 24-hour window, so they read zero.
+        </Alert>
+      )}
 
       <Grid container spacing={{ xs: 2, md: 3 }}>
         {/* ---- metric tiles -------------------------------------------- */}

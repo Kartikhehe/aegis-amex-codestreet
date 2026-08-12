@@ -373,14 +373,36 @@ def _pick(rng: random.Random, options: dict[str, float]) -> str:
 
 
 def _timestamp(rng: random.Random, now: datetime) -> datetime:
+    """Pick a decision time inside the seeded window, diurnally weighted.
+
+    The window ENDS at `now` rather than at the end of today. Two bugs came
+    from getting this wrong, and both made the dashboard look broken:
+
+      1. Replacing the hour on `now - day_offset` moves a timestamp FORWARD
+         when the drawn hour is later than the current hour, so day_offset=0
+         produced actions in the future -- and, more visibly, most of "today's"
+         traffic landed at hours already past, leaving the last 24h nearly
+         empty.
+      2. Anchoring to the seed date means the corpus ages. Two days after
+         seeding, a 24-hour dashboard window contains nothing at all and every
+         tile reads zero.
+
+    Sampling an offset backwards from `now` fixes both: the newest actions are
+    always minutes old, whenever the seed happens to be run.
+    """
     day_offset = rng.randint(0, dist.SEED_DAYS - 1)
     hour = rng.choices(range(24), weights=dist.HOUR_WEIGHTS, k=1)[0]
-    return (now - timedelta(days=day_offset)).replace(
+    candidate = (now - timedelta(days=day_offset)).replace(
         hour=hour,
         minute=rng.randint(0, 59),
         second=rng.randint(0, 59),
         microsecond=rng.randint(0, 999999),
     )
+    # Never emit a decision in the future; fold it back a day instead of
+    # clamping, which would pile timestamps up on a single instant.
+    if candidate > now:
+        candidate -= timedelta(days=1)
+    return candidate
 
 
 def _amount(rng: random.Random, merchant: dist.SeedMerchant, ceiling: Decimal, kind: str) -> Decimal:
