@@ -39,19 +39,62 @@ const VERDICTS = {
   },
 };
 
+/**
+ * A step-up that the card member has since answered.
+ *
+ * The verdict is immutable -- it is what the engine decided, and it is inside
+ * the hashed ledger payload, so it stays STEP_UP forever. What CHANGES is
+ * step_up_state. Rendering the verdict alone left an approved purchase reading
+ * "Needs approval" in the console long after the member had approved it in
+ * their app, which made the two surfaces look out of sync when they were not.
+ */
+const STEP_UP_STATES = {
+  approved: {
+    label: 'Approved by member',
+    icon: 'material-symbols:check-circle-rounded',
+    palette: 'success',
+  },
+  always_allowed: {
+    label: 'Always allowed',
+    icon: 'material-symbols:check-circle-rounded',
+    palette: 'success',
+  },
+  declined: {
+    label: 'Declined by member',
+    icon: 'material-symbols:block-rounded',
+    palette: 'error',
+  },
+  expired: {
+    label: 'Approval expired',
+    icon: 'material-symbols:hourglass-disabled-rounded',
+    palette: 'neutral',
+  },
+};
+
 const SIZES = {
   small: { px: 0.75, py: 0.25, gap: 0.5, font: 'monoCaption', icon: 13, radius: 6 },
   medium: { px: 1, py: 0.5, gap: 0.625, font: 'monoSmall', icon: 15, radius: 7 },
   large: { px: 1.75, py: 1, gap: 1, font: 'monoHeading', icon: 24, radius: 10 },
 };
 
-const VerdictChip = ({ verdict, size = 'medium', showLabel = true, sx, ...rest }) => {
-  const config = VERDICTS[verdict] ?? VERDICTS.HOLD;
+const VerdictChip = ({ verdict, stepUpState, size = 'medium', showLabel = true, sx, ...rest }) => {
+  // A resolved step-up shows what the member decided; an unresolved one still
+  // shows the engine's verdict, because it genuinely is still waiting.
+  const resolved = verdict === 'STEP_UP' ? STEP_UP_STATES[stepUpState] : null;
+  const config = resolved ?? VERDICTS[verdict] ?? VERDICTS.HOLD;
   const dimensions = SIZES[size] ?? SIZES.medium;
   const isNeutral = config.palette === 'neutral';
 
   return (
-    <Tooltip title={glossary[verdict] ?? ''} placement="top" enterDelay={400}>
+    <Tooltip
+      title={
+        resolved
+          ? 'The engine held this for approval; the card member has since answered.'
+          : (glossary[verdict] ?? '')
+      }
+      placement="top"
+      enterDelay={400}
+    >
       <Box
         sx={[
           (theme) => ({

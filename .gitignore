@@ -43,3 +43,5 @@ firebase-debug.log
 # repository would triple its size and confuse what is actually ours.
 # Keep the archive locally if you want the reference.
 Aurora-JavaScript-v1.7.0/
+apps/simulator/node_modules
+apps/simulator/dist

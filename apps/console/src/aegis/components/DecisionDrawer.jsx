@@ -170,7 +170,11 @@ const DecisionBody = ({ decision, onClose }) => {
         })}
       >
         <Stack direction="row" alignItems="flex-start" justifyContent="space-between" spacing={2}>
-          <VerdictChip verdict={decision.verdict} size="large" />
+          <VerdictChip
+            verdict={decision.verdict}
+            stepUpState={decision.step_up_state}
+            size="large"
+          />
           <IconButton size="small" onClick={onClose} aria-label="Close">
             <IconifyIcon icon="material-symbols:close-rounded" />
           </IconButton>

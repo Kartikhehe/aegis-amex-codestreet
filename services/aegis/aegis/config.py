@@ -125,7 +125,9 @@ class Settings:
             o.strip()
             for o in os.environ.get(
                 "AEGIS_CORS_ORIGINS",
-                "http://localhost:5002,http://localhost:5003,http://localhost:5173",
+                # 5002 console · 5003 card member · 5004 agent simulator
+                "http://localhost:5002,http://localhost:5003,"
+                "http://localhost:5004,http://localhost:5173",
             ).split(",")
             if o.strip()
         )

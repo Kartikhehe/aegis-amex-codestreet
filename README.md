@@ -21,6 +21,7 @@ cd infra && docker compose up
 
 # Console      http://localhost:5002
 # Member app   http://localhost:5003
+# Simulator    http://localhost:5004
 # API + docs   http://localhost:8000/docs
 ```
 
@@ -57,6 +58,7 @@ DATABASE_URL="sqlite:///./dev.db" AEGIS_ENABLE_DEMO=true \
 ```
 apps/console      Aurora MUI admin template, re-themed → operator console
 apps/member       lightweight MUI app → card member phone surface
+apps/simulator    storefront surface → drive a real agent through a checkout
 services/aegis    FastAPI + Pydantic + SQLAlchemy + Alembic
 infra             docker-compose: postgres:16, redis:7, the service
 ```
@@ -356,6 +358,59 @@ to somebody.
 **Policy Studio's blast radius** replays real recorded decisions under a
 candidate ruleset and lists the specific transactions that would change. A count
 is a claim; a list is evidence.
+
+---
+
+## The agent simulator
+
+`apps/simulator` (port 5004) is a storefront you can walk into as an agent. Pick
+an operator, pick one of its agents, pick a shop, and say what you want in
+words:
+
+```
+FreshMart Daily Grocers · "buy 2kg rice, milk and some vegetables"
+  → cart  Basmati rice 5kg ×2, Milk 1L ×1, Fresh vegetables basket ×1
+  → ALLOW  within_mandate
+
+FreshMart Gift Card Centre · "get me a gift card for 2500"
+  → DENY   prohibited_attribute_veto
+```
+
+**It is a real client, not a demo mode.** `POST /simulate/checkout` reads the
+sentence into a basket and then calls the same `decide()` any production
+integration would: same identity seam, same rate limit, same idempotency, same
+engine, same ledger append. A verdict seen here is one the product would
+genuinely have produced. There is deliberately no shortcut into the engine —
+a simulator that could stage its own verdicts would demonstrate nothing.
+
+Two rules make that guarantee hold:
+
+- **Prices and risk attributes come from the server's catalogue**, never from
+  the client. If prose could set an amount or clear a `gift_card` attribute,
+  anyone could talk a cart past `prohibited_attribute_veto`.
+- **Injection detection stays deterministic** even when a model parses the
+  sentence. Asking a model whether its own input was adversarial is not a
+  control.
+
+The prompt is read by rules (offline, deterministic, same cart every time). If
+`OPENAI_API_KEY` is set the model does the extraction instead — but only to
+pick SKUs and quantities from the catalogue — and falls back to the rules on
+any failure.
+
+### Watching all three surfaces
+
+The point of the simulator is the loop between the three apps:
+
+| | | |
+|---|---|---|
+| **5004** simulator | an agent tries to buy something | |
+| **5002** console | the decision appears in the live stream | operator's view |
+| **5003** member app | a held purchase waits to be answered | card member's view |
+
+A `STEP_UP` demonstrates it end to end: the storefront shows "waiting for card
+member" and keeps polling; you approve in the member app; the storefront
+completes the order and the console chip turns from *Needs approval* to
+*Approved by member*.
 
 ---
 

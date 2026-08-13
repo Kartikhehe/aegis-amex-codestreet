@@ -475,3 +475,52 @@ class StepUpResolveResponse(ApiModel):
 
 
 AgentTreeNode.model_rebuild()
+
+
+# --------------------------------------------------------------------------
+# Agent simulator
+# --------------------------------------------------------------------------
+
+
+class SimulateCheckoutRequest(ApiModel):
+    """A shopper's sentence at one storefront, on behalf of one agent.
+
+    Deliberately small: the caller says WHO is buying, WHERE, and WHAT they
+    asked for in words. Everything the engine rules on -- amount, cart lines,
+    attributes -- is derived server-side from the catalogue, never accepted
+    from the client. A simulator that could post its own amounts and
+    attributes would be able to manufacture any verdict it liked, which would
+    make it a puppet show rather than a demonstration.
+    """
+
+    agent_id: str
+    merchant_id: str
+    prompt: str = Field(..., min_length=1, max_length=2000)
+    ship_to: Optional[str] = None
+    idempotency_key: Optional[str] = None
+
+
+class SimulatedCartLine(ApiModel):
+    label: str
+    quantity: int
+    unit_amount: Decimal
+    attributes: list[str] = Field(default_factory=list)
+
+
+class SimulateCheckoutResponse(ApiModel):
+    """What the storefront shows back: the cart it built, and the verdict."""
+
+    action_id: str
+    merchant_id: str
+    merchant_name: str
+    merchant_category: str
+    cart: list[SimulatedCartLine]
+    amount: Decimal
+    currency: str = "INR"
+    ship_to: Optional[str] = None
+    injected_instruction: Optional[str] = None
+    parse_source: str = Field(
+        "rules", description="How the sentence was read: 'rules' or 'openai'."
+    )
+    parse_note: str = ""
+    decision: DecisionOut

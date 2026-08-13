@@ -92,7 +92,7 @@ const StreamRow = ({ decision, isNew, onSelect, showShadow }) => {
 
       {/* verdict */}
       <Box>
-        <VerdictChip verdict={decision.verdict} size="small" />
+        <VerdictChip verdict={decision.verdict} stepUpState={decision.step_up_state} size="small" />
       </Box>
 
       {/* merchant + reason */}

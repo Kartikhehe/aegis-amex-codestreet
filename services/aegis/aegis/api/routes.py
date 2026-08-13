@@ -55,6 +55,7 @@ from ..engine.types import ActionRequest, CartItem, Mandate, utcnow
 from ..firestore import get_mirror, mint_custom_token
 from ..providers import ProviderUnavailable, get_providers
 from ..scoring import get_conformance_engine, get_idempotency_store, get_rate_limiter
+from ..storefront import get_storefront, parse_prompt, storefronts
 from ..service import (
     active_ruleset,
     agent_from_row,
@@ -1385,4 +1386,107 @@ def _fleet_out(state) -> s.FleetStateOut:
         stop_reason=state.stop_reason or "",
         rearm_approvals=list(state.rearm_approvals or []),
         approvals_required=2,
+    )
+
+
+# --------------------------------------------------------------------------
+# Agent simulator
+#
+# A storefront surface that acts as a REAL client of this API. It reads a
+# sentence into a basket, then calls the same decide() this module already
+# exposes -- same identity seam, same rate limit, same idempotency, same
+# engine, same ledger append, same broadcast.
+#
+# The temptation is to give the simulator a shortcut into the engine so the
+# demo is easier to control. That would be worth nothing: what makes this
+# convincing is precisely that nothing here can produce a verdict the real
+# integration path would not produce.
+# --------------------------------------------------------------------------
+
+
+@router.get("/storefronts", response_model=list[dict], tags=["simulator"])
+def list_storefronts(principal: CurrentUser) -> list[dict]:
+    """Shops the simulator can walk into, with their catalogues."""
+    return storefronts()
+
+
+@router.post(
+    "/simulate/checkout",
+    response_model=s.SimulateCheckoutResponse,
+    tags=["simulator"],
+)
+def simulate_checkout(
+    payload: s.SimulateCheckoutRequest,
+    db: DbSession,
+    principal: CurrentUser,
+    response: Response,
+) -> s.SimulateCheckoutResponse:
+    shop = get_storefront(payload.merchant_id)
+    if shop is None:
+        raise HTTPException(status_code=404, detail=f"Unknown storefront {payload.merchant_id}")
+
+    parsed = parse_prompt(payload.prompt, shop)
+
+    # An explicit ship-to from the storefront UI beats one inferred from prose.
+    ship_to = payload.ship_to or parsed.ship_to
+    if shop.ship_to_options and ship_to not in shop.ship_to_options:
+        ship_to = shop.ship_to_options[0]
+
+    amount = parsed.total
+    if amount <= 0:
+        raise HTTPException(status_code=422, detail="That prompt did not add up to a purchase.")
+
+    # Attributes the engine vetoes on are the UNION of what the shop is and
+    # what is in the basket, so a grocery-coded shop selling a gift card is
+    # caught by the cart even though its category is permitted.
+    cart_attributes: set[str] = set(shop.attributes)
+    for line in parsed.items:
+        cart_attributes.update(line.get("attributes", []))
+
+    decide_request = s.DecideRequest(
+        agent_id=payload.agent_id,
+        merchant_id=shop.merchant_id,
+        merchant_name=shop.name,
+        merchant_category=shop.category,
+        amount=amount,
+        currency="INR",
+        description=payload.prompt.strip()[:400],
+        merchant_attributes=sorted(cart_attributes),
+        cart_items=[
+            s.CartItemIn(
+                label=line["label"],
+                quantity=int(line["quantity"]),
+                unit_amount=Decimal(str(line["unit_amount"])),
+                attributes=list(line.get("attributes", [])),
+            )
+            for line in parsed.items
+        ],
+        ship_to=ship_to,
+        injected_instruction=parsed.injected_instruction,
+        idempotency_key=payload.idempotency_key,
+    )
+
+    # The real path. Not a copy of it.
+    decision = decide(payload=decide_request, db=db, principal=principal, response=response)
+
+    return s.SimulateCheckoutResponse(
+        action_id=decision.action_id,
+        merchant_id=shop.merchant_id,
+        merchant_name=shop.name,
+        merchant_category=shop.category,
+        cart=[
+            s.SimulatedCartLine(
+                label=line["label"],
+                quantity=int(line["quantity"]),
+                unit_amount=Decimal(str(line["unit_amount"])),
+                attributes=list(line.get("attributes", [])),
+            )
+            for line in parsed.items
+        ],
+        amount=amount,
+        ship_to=ship_to,
+        injected_instruction=parsed.injected_instruction,
+        parse_source=parsed.source,
+        parse_note=parsed.note,
+        decision=decision,
     )

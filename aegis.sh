@@ -11,7 +11,7 @@
 #   ./aegis.sh test      backend unit tests + end-to-end verification
 #   ./aegis.sh seed      rebuild the database from scratch (destructive)
 #
-# Ports:  8000 API   5002 console   5003 member app
+# Ports:  8000 API   5002 console   5003 member app   5004 simulator
 #
 set -uo pipefail
 
@@ -22,6 +22,7 @@ mkdir -p "$LOGS"
 API_PORT=8000
 CONSOLE_PORT=5002
 MEMBER_PORT=5003
+SIM_PORT=5004
 
 # The demo database, as an ABSOLUTE path. A relative sqlite URL resolves
 # against the working directory, so it silently points at a different (usually
@@ -88,9 +89,19 @@ start_member() {
   fi
 }
 
+start_simulator() {
+  if [ -n "$(port_pid $SIM_PORT)" ]; then dim "  sim      already running on :$SIM_PORT"; return; fi
+  ( cd "$ROOT/apps/simulator" && nohup npm run dev > "$LOGS/simulator.log" 2>&1 & )
+  if wait_for "http://localhost:$SIM_PORT/" 60; then
+    green "  sim      http://localhost:$SIM_PORT"
+  else
+    red   "  sim      FAILED to start -- see .logs/simulator.log"
+  fi
+}
+
 stop_all() {
   echo "Stopping AEGIS…"
-  for port in $API_PORT $CONSOLE_PORT $MEMBER_PORT; do
+  for port in $API_PORT $CONSOLE_PORT $MEMBER_PORT $SIM_PORT; do
     pids=$(lsof -ti:"$port" 2>/dev/null)
     [ -z "$pids" ] && continue
 
@@ -122,7 +133,7 @@ stop_all() {
 status() {
   echo "AEGIS status"
   echo
-  for entry in "api:$API_PORT:/health" "console:$CONSOLE_PORT:/" "member:$MEMBER_PORT:/"; do
+  for entry in "api:$API_PORT:/health" "console:$CONSOLE_PORT:/" "member:$MEMBER_PORT:/" "sim:$SIM_PORT:/"; do
     name="${entry%%:*}"; rest="${entry#*:}"; port="${rest%%:*}"; path="${rest#*:}"
     pid=$(port_pid "$port")
     if [ -n "$pid" ]; then
@@ -147,7 +158,7 @@ status() {
 case "${1:-status}" in
   start)
     echo "Starting AEGIS…"
-    start_api; start_console; start_member
+    start_api; start_console; start_member; start_simulator
     echo
     dim "  sign in with operator@aegis.test / password123"
     ;;
