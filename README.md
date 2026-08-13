@@ -361,6 +361,44 @@ is a claim; a list is evidence.
 
 ---
 
+## The OpenAI key
+
+AEGIS runs, decides and demonstrates **without** a key. Setting one upgrades two
+things: conformance scoring, and how the simulator reads your prompt.
+
+```bash
+cp .env.local.example .env.local
+# put the real key in .env.local
+./aegis.sh restart
+./aegis.sh status          # confirms: scorer LIVE (gpt-4.1-mini, key ...abcd)
+```
+
+`.env.local` is gitignored and `aegis.sh` reads it at startup. Anything already
+exported in your shell wins, so a one-off still works:
+
+```bash
+OPENAI_API_KEY=sk-... ./aegis.sh restart
+```
+
+| | without a key | with a key |
+|---|---|---|
+| Conformance score | recorded fixture, then deterministic scorer | `gpt-4.1-mini`, deterministic on failure |
+| Simulator parsing | keyword rules | model extraction, rules on failure |
+| Network calls | none | one per uncached decision |
+
+**A bad key does not break anything.** The call fails, the deterministic scorer
+takes over, and the reason is recorded in `model_version` — so a fallback score
+can never be mistaken for a model score:
+
+```
+deterministic-v1 (fallback: AuthenticationError: 401 ...)
+```
+
+Note that seeding 25,000 actions with a live key means 25,000 billable calls.
+Seed offline, then set the key for demos.
+
+---
+
 ## The agent simulator
 
 `apps/simulator` (port 5004) is a storefront you can walk into as an agent. Pick

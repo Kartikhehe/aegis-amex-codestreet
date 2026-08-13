@@ -24,6 +24,31 @@ CONSOLE_PORT=5002
 MEMBER_PORT=5003
 SIM_PORT=5004
 
+# Local secrets, if you have any. .env.local is gitignored, so a real key put
+# here survives restarts without ever being committed. Anything already in your
+# shell environment wins, so a one-off `OPENAI_API_KEY=sk-... ./aegis.sh start`
+# still overrides the file.
+ENV_LOCAL="$ROOT/.env.local"
+if [ -f "$ENV_LOCAL" ]; then
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in ''|'#'*) continue ;; esac
+    key="${line%%=*}"
+    value="${line#*=}"
+    [ "$key" = "$line" ] && continue          # no '=' on the line
+    key="$(printf '%s' "$key" | tr -d '[:space:]')"
+    # Strip one layer of surrounding quotes, so KEY="sk-..." works too.
+    case "$value" in
+      \"*\") value="${value#\"}"; value="${value%\"}" ;;
+      \'*\') value="${value#\'}"; value="${value%\'}" ;;
+    esac
+    # Only set what is not already in the environment: an explicit
+    # OPENAI_API_KEY=... in front of this script must win over the file.
+    if [ -z "$(eval "printf '%s' \"\${$key:-}\"")" ]; then
+      export "$key=$value"
+    fi
+  done < "$ENV_LOCAL"
+fi
+
 # The demo database, as an ABSOLUTE path. A relative sqlite URL resolves
 # against the working directory, so it silently points at a different (usually
 # empty) file depending on where you launched from.
@@ -130,6 +155,19 @@ stop_all() {
   green "Stopped."
 }
 
+scorer_line() {
+  # What the conformance scorer will actually do, which is not obvious from
+  # the outside: with no key the engine serves recorded scores and falls back
+  # to the deterministic scorer, and never makes a network call.
+  if [ -n "${OPENAI_API_KEY:-}" ]; then
+    green "  scorer    LIVE  (${AEGIS_SCORER_MODEL:-gpt-4.1-mini}, key ...${OPENAI_API_KEY: -4})"
+  else
+    dim   "  scorer    replay + deterministic fallback (no OPENAI_API_KEY)"
+    dim   "            add one to .env.local to score with the model:"
+    dim   "            echo 'OPENAI_API_KEY=sk-...' >> .env.local && ./aegis.sh restart"
+  fi
+}
+
 status() {
   echo "AEGIS status"
   echo
@@ -153,6 +191,7 @@ status() {
   else
     red "  database  MISSING -- run ./aegis.sh seed"
   fi
+  scorer_line
 }
 
 case "${1:-status}" in
@@ -170,6 +209,8 @@ case "${1:-status}" in
     echo "AEGIS doctor"
     echo
     echo "  shell DATABASE_URL : ${DATABASE_URL}"
+    echo
+    scorer_line
     echo
     if [ -f "$ROOT/services/aegis/dev.db" ]; then
       green "  demo database      present ($(du -h "$ROOT/services/aegis/dev.db" | cut -f1))"
