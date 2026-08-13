@@ -24,7 +24,11 @@ import json
 import os
 import re
 from dataclasses import dataclass, field
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
+
+# The engine's own manipulation vocabulary. Imported rather than duplicated so
+# the two can never disagree about what counts as an injection attempt.
+from .engine.conformance import INJECTION_PHRASES
 
 # --------------------------------------------------------------------------
 # Catalogue
@@ -288,6 +292,9 @@ class ParsedCart:
     injected_instruction: str | None = None
     note: str = ""
     source: str = "rules"
+    # True when the request named nothing this shop stocks and no amount was
+    # given, so there is no honest cart to build from rules alone.
+    unmatched: bool = False
 
     @property
     def total(self) -> Decimal:
@@ -309,24 +316,13 @@ _EXPLICIT_AMOUNT = re.compile(r"(?:worth|for|of|upto|up to|under|about)?\s*(?:â‚
 # so the simulator can pass it to the engine as `injected_instruction`; the
 # ENGINE decides what it means. Keeping the judgement server-side matters --
 # a client that could self-clear injection would be worthless as a control.
-_INJECTION_HINTS = (
-    "ignore your",
-    "ignore all",
-    "ignore previous",
-    "disregard",
-    "override",
-    "bypass",
-    "you are now",
-    "new instructions",
-    "admin says",
-    "developer mode",
-    "do not check",
-    "skip the",
-    "without approval",
-    "don't tell",
-    "do not tell",
-    "pretend",
-)
+#
+# This reuses the ENGINE's list rather than keeping a second one. They had
+# already drifted: the simulator flagged "ignore your instructions" and the
+# engine did not, so the text was attached to the record as evidence but no
+# suspected_injection rule fired -- the worst possible split, because it looks
+# like detection is working while the veto silently is not.
+_INJECTION_HINTS = INJECTION_PHRASES
 
 _SHIP_TO_HINTS = (
     ("office", ("office", "work", "workplace")),
@@ -434,7 +430,7 @@ def parse_with_rules(prompt: str, shop: Storefront) -> ParsedCart:
     cart.items = list(chosen.values())
 
     # A bare amount with no recognisable product still deserves a cart -- the
-    # member said what they wanted to spend, and the engine can rule on that.
+    # shopper said what they wanted to spend, and the engine can rule on that.
     if not cart.items:
         amount_match = _EXPLICIT_AMOUNT.search(prompt)
         if amount_match:
@@ -449,16 +445,22 @@ def parse_with_rules(prompt: str, shop: Storefront) -> ParsedCart:
             ]
             cart.note = "No catalogue item matched; used the amount you named."
         else:
-            default = shop.products[0]
-            cart.items = [
-                {
-                    "label": default.label,
-                    "quantity": 1,
-                    "unit_amount": str(default.unit_amount),
-                    "attributes": list(default.attributes),
-                }
-            ]
-            cart.note = "Nothing in the prompt matched the catalogue; assumed one default item."
+            # NOTHING matched and no amount was given.
+            #
+            # The previous behaviour here was to assume the shop's first
+            # product. That is the worst thing this function can do: asking for
+            # "2 coffees and a salad" at a shop with neither produced a basket
+            # containing Atta 10kg, and the engine then correctly refused a
+            # purchase the shopper never requested. A truthful verdict about a
+            # fabricated cart is worse than no verdict, because it looks like
+            # the engine misjudged when in fact it was misinformed.
+            #
+            # Say so instead, and let the caller decide -- for an unpriceable
+            # request that means asking the model, not guessing.
+            cart.unmatched = True
+            cart.note = (
+                f"Nothing in that request matched what {shop.name} sells."
+            )
 
     cart.ship_to = _detect_ship_to(prompt, shop.ship_to_options)
     cart.injected_instruction = _detect_injection(prompt)
@@ -475,25 +477,80 @@ _LLM_SCHEMA = {
                 "type": "object",
                 "additionalProperties": False,
                 "properties": {
+                    # A catalogue SKU when the shop stocks it, else "" and the
+                    # model names and prices the item itself.
                     "sku": {"type": "string"},
+                    "label": {"type": "string"},
+                    "unit_amount": {"type": "number"},
                     "quantity": {"type": "integer"},
                 },
-                "required": ["sku", "quantity"],
+                "required": ["sku", "label", "unit_amount", "quantity"],
             },
         },
         "ship_to": {"type": "string"},
+        "sold_here": {
+            "type": "boolean",
+            "description": "False if this shop plausibly does not sell these items at all.",
+        },
     },
-    "required": ["items", "ship_to"],
+    "required": ["items", "ship_to", "sold_here"],
 }
 
 
-def parse_with_llm(prompt: str, shop: Storefront) -> ParsedCart | None:
-    """Extract a cart with OpenAI. Returns None so the caller can fall back.
+# A model-priced line above this is treated as a bad extraction rather than a
+# real request. Real baskets at these shops do not reach it, and it stops a
+# malformed number from becoming a plausible-looking authorisation.
+_MAX_MODEL_UNIT_PRICE = Decimal("1000000")
 
-    The model only ever picks SKUs and quantities from the catalogue: prices
-    and risk attributes come from our own product table. A model that could
-    set the amount or drop an attribute could talk its way past the rules,
-    which would make the whole demonstration meaningless.
+# Risk vocabulary, keyed on what the thing IS. This is the security boundary:
+# the model names an item, we decide what that item means. Kept deliberately
+# blunt -- a false positive here asks a human, which is the safe direction.
+_ATTRIBUTE_HINTS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("gift_card", ("gift card", "giftcard", "gift voucher", "e-gift")),
+    ("cash_equivalent", ("gift card", "giftcard", "voucher", "top-up", "top up",
+                         "wallet load", "prepaid", "money order")),
+    ("prepaid_instrument", ("prepaid", "top-up", "top up", "recharge", "wallet load")),
+    ("alcohol", ("alcohol", "wine", "beer", "whisky", "whiskey", "vodka", "rum",
+                 "gin", "liquor", "champagne", "cocktail", "minibar")),
+    ("crypto", ("bitcoin", "btc", "ethereum", "eth", "usdt", "tether", "crypto",
+                "stablecoin", "token purchase")),
+    ("gambling", ("casino", "betting", "lottery", "wager", "poker")),
+    ("tobacco", ("cigarette", "tobacco", "cigar", "vape", "nicotine")),
+)
+
+
+def _classify_attributes(label: str, shop: Storefront) -> list[str]:
+    """Decide the risk attributes of a model-named item, from its label.
+
+    Never trusts the model for this. A prompt that could clear an attribute
+    could walk any cart past prohibited_attribute_veto.
+    """
+    low = label.lower()
+    found = {attr for attr, hints in _ATTRIBUTE_HINTS if any(h in low for h in hints)}
+    # Whatever the shop itself carries applies to everything it sells: a
+    # crypto exchange's products are crypto regardless of their names.
+    found.update(shop.attributes)
+    return sorted(found)
+
+
+def parse_with_llm(prompt: str, shop: Storefront) -> ParsedCart | None:
+    """Read a sentence into a basket with one small model call.
+
+    The model does the job the rules cannot: pricing things this shop plausibly
+    sells but that are not in the catalogue. A supermarket really does sell
+    coffee and salad even though our fixture lists nine items, and refusing to
+    price them -- or worse, substituting atta -- makes the simulator useless
+    for anything but the scripted examples.
+
+    What the model MAY do: name items, set a plausible unit price, set
+    quantities, and say whether the shop sells this kind of thing at all.
+
+    What it may NOT do, ever: decide risk attributes. Those come from
+    _classify_attributes below, on the label the model returned. If prose could
+    talk an item out of carrying `gift_card`, prohibited_attribute_veto would
+    be bypassable from the prompt, and the entire control would be theatre.
+
+    Returns None on any failure so the caller falls back to the rules.
     """
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -502,7 +559,7 @@ def parse_with_llm(prompt: str, shop: Storefront) -> ParsedCart | None:
         from openai import OpenAI  # imported lazily; optional dependency
 
         catalogue = "\n".join(
-            f"  {p.sku}: {p.label} (â‚¹{p.unit_amount})" for p in shop.products
+            f"  {p.sku}: {p.label} (INR {p.unit_amount})" for p in shop.products
         )
         client = OpenAI(api_key=api_key)
         completion = client.chat.completions.create(
@@ -511,16 +568,27 @@ def parse_with_llm(prompt: str, shop: Storefront) -> ParsedCart | None:
                 {
                     "role": "system",
                     "content": (
-                        "You convert a shopper's sentence into a basket at one shop. "
-                        "Choose only from the catalogue SKUs given. Quantities are "
-                        "whole numbers >= 1. ship_to must be one of: "
+                        "You are the order-taking system for one shop in India. "
+                        "Convert the shopper's sentence into a basket.\n"
+                        "- Prefer a catalogue SKU when the shop lists the item: "
+                        "return its sku and its exact catalogue price.\n"
+                        "- If the shop would plausibly sell the item but it is not "
+                        "listed, return sku=\"\" with a sensible Indian retail "
+                        "price in INR for that item.\n"
+                        "- unit_amount is the price of ONE unit, in INR, never the "
+                        "line total.\n"
+                        "- Set sold_here=false only if this type of shop would not "
+                        "sell these goods at all.\n"
+                        "- ship_to must be one of: "
                         + ", ".join(shop.ship_to_options)
-                        + ". If nothing matches, return the single closest item."
                     ),
                 },
                 {
                     "role": "user",
-                    "content": f"Shop: {shop.name}\nCatalogue:\n{catalogue}\n\nSentence: {prompt}",
+                    "content": (
+                        f"Shop: {shop.name} ({shop.kind}, MCC {shop.category})\n"
+                        f"Catalogue:\n{catalogue}\n\nSentence: {prompt}"
+                    ),
                 },
             ],
             response_format={
@@ -533,20 +601,54 @@ def parse_with_llm(prompt: str, shop: Storefront) -> ParsedCart | None:
     except Exception:
         return None
 
+    if not data.get("sold_here", True):
+        # The model says this shop does not sell this at all. That is a real
+        # answer, not a failure: it becomes an honest "wrong shop" message
+        # rather than a basket of something else.
+        return ParsedCart(items=[], unmatched=True, source="openai",
+                          note=f"{shop.name} does not sell that.",
+                          injected_instruction=_detect_injection(prompt))
+
     by_sku = {p.sku: p for p in shop.products}
     items = []
     for entry in data.get("items", []):
-        product = by_sku.get(entry.get("sku", ""))
-        if product is None:
+        product = by_sku.get(entry.get("sku") or "")
+        quantity = max(1, min(int(entry.get("quantity", 1) or 1), 99))
+
+        if product is not None:
+            # Catalogue item: our price, our attributes. The model chose it,
+            # it did not describe it.
+            items.append(
+                {
+                    "label": product.label,
+                    "quantity": quantity,
+                    "unit_amount": str(product.unit_amount),
+                    "attributes": list(product.attributes),
+                }
+            )
+            continue
+
+        label = (entry.get("label") or "").strip()
+        if not label:
+            continue
+        try:
+            unit = Decimal(str(entry.get("unit_amount", 0))).quantize(Decimal("0.01"))
+        except (InvalidOperation, ValueError):
+            continue
+        # Reject a nonsense price rather than letting it reach the engine as
+        # though the shopper had asked for it.
+        if unit <= 0 or unit > _MAX_MODEL_UNIT_PRICE:
             continue
         items.append(
             {
-                "label": product.label,
-                "quantity": max(1, min(int(entry.get("quantity", 1) or 1), 99)),
-                "unit_amount": str(product.unit_amount),
-                "attributes": list(product.attributes),
+                "label": label,
+                "quantity": quantity,
+                # Attributes are OURS, derived from the label. Never the model's.
+                "attributes": _classify_attributes(label, shop),
+                "unit_amount": str(unit),
             }
         )
+
     if not items:
         return None
 

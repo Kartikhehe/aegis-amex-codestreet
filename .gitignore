@@ -22,6 +22,7 @@ build/
 # Secrets. Never commit a real key.
 .env.local
 .env.*.local
+.env
 
 # Firebase service-account keys. These ARE secret -- unlike the web API key in
 # apps/*/.env, which only identifies the project and is governed by security

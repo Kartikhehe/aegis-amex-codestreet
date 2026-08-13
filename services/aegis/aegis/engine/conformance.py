@@ -162,14 +162,28 @@ INJECTION_PHRASES: tuple[str, ...] = (
     "ignore previous",
     "ignore prior",
     "ignore all previous",
+    # "ignore your ..." was missing while "forget your instructions" was
+    # present, so "ignore your instructions" -- among the most obvious
+    # phrasings there is -- went undetected. Match the shape of the attempt,
+    # not one exact sentence.
+    "ignore your",
+    "ignore the",
+    "ignore all",
     "disregard previous",
     "disregard your",
+    "disregard the",
     "override the",
     "override your",
     "bypass the",
+    "bypass your",
     "you are now",
     "new instructions",
     "system prompt",
+    "developer mode",
+    "admin says",
+    "do not check",
+    "skip the",
+    "without approval",
     "do not tell",
     "don't tell the",
     "without telling",
@@ -177,8 +191,11 @@ INJECTION_PHRASES: tuple[str, ...] = (
     "urgent: transfer",
     "send the balance",
     "forget your instructions",
+    "forget your",
     "your real task",
     "actually, instead",
+    "mark everything as approved",
+    "pretend",
 )
 
 

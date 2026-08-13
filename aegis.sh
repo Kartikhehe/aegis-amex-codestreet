@@ -24,12 +24,18 @@ CONSOLE_PORT=5002
 MEMBER_PORT=5003
 SIM_PORT=5004
 
-# Local secrets, if you have any. .env.local is gitignored, so a real key put
-# here survives restarts without ever being committed. Anything already in your
-# shell environment wins, so a one-off `OPENAI_API_KEY=sk-... ./aegis.sh start`
-# still overrides the file.
-ENV_LOCAL="$ROOT/.env.local"
-if [ -f "$ENV_LOCAL" ]; then
+green() { printf "\033[32m%s\033[0m\n" "$1"; }
+red()   { printf "\033[31m%s\033[0m\n" "$1"; }
+dim()   { printf "\033[2m%s\033[0m\n" "$1"; }
+
+# Local secrets, if you have any. Both files are gitignored, so a real key put
+# in either survives restarts without ever being committed. Anything already in
+# your shell environment wins, so a one-off `OPENAI_API_KEY=sk-... ./aegis.sh
+# start` still overrides them.
+#
+# .env.local is read last so it takes precedence over .env.
+load_env_file() {
+  [ -f "$1" ] || return 0
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in ''|'#'*) continue ;; esac
     key="${line%%=*}"
@@ -41,13 +47,26 @@ if [ -f "$ENV_LOCAL" ]; then
       \"*\") value="${value#\"}"; value="${value%\"}" ;;
       \'*\') value="${value#\'}"; value="${value%\'}" ;;
     esac
-    # Only set what is not already in the environment: an explicit
-    # OPENAI_API_KEY=... in front of this script must win over the file.
+
+    # Accept the near-misses for the OpenAI key rather than silently ignoring
+    # them. OPEN_API_KEY (no "I") is an easy typo to make and an expensive one
+    # to debug: everything keeps working, just never with the model.
+    case "$key" in
+      OPEN_API_KEY|OPENAI_KEY|OPENAI_APIKEY)
+        red "  note: $key in $(basename "$1") should be OPENAI_API_KEY -- using it anyway"
+        key=OPENAI_API_KEY
+        ;;
+    esac
+
+    # Only set what is not already in the environment.
     if [ -z "$(eval "printf '%s' \"\${$key:-}\"")" ]; then
       export "$key=$value"
     fi
-  done < "$ENV_LOCAL"
-fi
+  done < "$1"
+}
+
+load_env_file "$ROOT/.env"
+load_env_file "$ROOT/.env.local"
 
 # The demo database, as an ABSOLUTE path. A relative sqlite URL resolves
 # against the working directory, so it silently points at a different (usually
@@ -67,9 +86,6 @@ if [ -f "$AEGIS_SA_KEY" ]; then
   export GOOGLE_APPLICATION_CREDENTIALS="${GOOGLE_APPLICATION_CREDENTIALS:-$AEGIS_SA_KEY}"
 fi
 
-green() { printf "\033[32m%s\033[0m\n" "$1"; }
-red()   { printf "\033[31m%s\033[0m\n" "$1"; }
-dim()   { printf "\033[2m%s\033[0m\n" "$1"; }
 
 port_pid() { lsof -ti:"$1" 2>/dev/null | head -1; }
 

@@ -1427,6 +1427,22 @@ def simulate_checkout(
 
     parsed = parse_prompt(payload.prompt, shop)
 
+    # Nothing in the request matched what this shop sells, and no amount was
+    # named. Say so, rather than inventing a basket.
+    #
+    # The alternative -- substituting a default product -- produced a verdict
+    # about a purchase nobody requested, which reads as the engine getting it
+    # wrong when in fact it was asked the wrong question. A simulator that
+    # fabricates its own inputs cannot demonstrate anything about the engine.
+    if parsed.unmatched or not parsed.items:
+        detail = parsed.note or f"Nothing in that request matched what {shop.name} sells."
+        if not get_settings().openai_api_key:
+            detail += (
+                " The catalogue parser only recognises stocked items; set "
+                "OPENAI_API_KEY so the agent can price anything this shop sells."
+            )
+        raise HTTPException(status_code=422, detail=detail)
+
     # An explicit ship-to from the storefront UI beats one inferred from prose.
     ship_to = payload.ship_to or parsed.ship_to
     if shop.ship_to_options and ship_to not in shop.ship_to_options:

@@ -293,6 +293,10 @@ const App = () => {
         watchDecision(response.action_id);
       }
     } catch (err) {
+      // A 422 means the shop could not build a basket from that request. It is
+      // NOT a verdict, and must not be shown as one: the engine was never
+      // asked. Surfacing it as an ordinary message keeps the distinction
+      // between "we don't sell that" and "your card holder said no".
       setError(
         err?.data?.detail ??
           (err?.status === 429
@@ -514,8 +518,9 @@ const App = () => {
                     understood them before judging the decision. */}
                 <Box>
                   <Typography variant="caption" sx={{ color: 'text.disabled' }}>
-                    The agent built this basket
-                    {result.parse_source === 'openai' ? ' (read by the model)' : ''}
+                    {result.parse_source === 'openai'
+                      ? 'The agent built this basket — items not in the catalogue were priced by the model'
+                      : 'The agent built this basket from the shop’s catalogue'}
                   </Typography>
                   <Stack spacing={0.5} sx={{ mt: 1 }}>
                     {result.cart.map((line, index) => (
