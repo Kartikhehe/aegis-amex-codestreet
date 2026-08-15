@@ -83,6 +83,19 @@ from fastapi import Depends
 router = APIRouter()
 
 
+def _as_naive_utc(value: datetime) -> datetime:
+    """Normalise an incoming instant for comparison against stored timestamps.
+
+    Columns are UTC, but SQLite hands back naive datetimes -- comparing one of
+    those against an aware value raises. A client sending "…Z" or "+05:30" is
+    converted to UTC first, so a range means the same instant regardless of the
+    zone the caller expressed it in.
+    """
+    if value.tzinfo is not None:
+        value = value.astimezone(timezone.utc)
+    return value.replace(tzinfo=None)
+
+
 # ---------------------------------------------------------------------------
 # Auth
 # ---------------------------------------------------------------------------
@@ -252,6 +265,12 @@ def list_decisions(
     agent_id: Optional[str] = None,
     flagged: Optional[bool] = None,
     step_up_state: Optional[str] = None,
+    merchant_id: Optional[str] = None,
+    # Date range, so a claim like "6 transactions today" can be opened and
+    # checked rather than taken on trust. Inclusive of `since`, exclusive of
+    # `until`, both UTC.
+    since: Optional[datetime] = Query(None, description="Decisions at or after this instant."),
+    until: Optional[datetime] = Query(None, description="Decisions strictly before this instant."),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ) -> s.DecisionPage:
@@ -273,6 +292,12 @@ def list_decisions(
         filters.append(DecisionRow.flagged == flagged)
     if step_up_state:
         filters.append(DecisionRow.step_up_state == step_up_state)
+    if merchant_id:
+        filters.append(DecisionRow.merchant_id == merchant_id)
+    if since is not None:
+        filters.append(DecisionRow.decided_at >= _as_naive_utc(since))
+    if until is not None:
+        filters.append(DecisionRow.decided_at < _as_naive_utc(until))
 
     for f in filters:
         stmt = stmt.where(f)

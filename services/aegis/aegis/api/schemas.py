@@ -6,15 +6,35 @@ two cannot drift. Field descriptions here become the client's documentation.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_serializer
 
 
 class ApiModel(BaseModel):
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    @field_serializer("*", when_used="json", check_fields=False)
+    def _serialise_datetimes_as_utc(self, value: Any) -> Any:
+        """Stamp every datetime with an explicit UTC offset.
+
+        The engine works in UTC throughout, but SQLite returns naive datetimes
+        -- it does not store tzinfo -- so the API was emitting
+        "2026-08-15T20:45:41" with no marker at all. A browser parses a naive
+        string as LOCAL time, so a decision made at 02:15 IST displayed as
+        20:45. The data was right and every clock reading it was wrong.
+
+        Stamping here rather than at each call site means no future field can
+        forget: any datetime leaving this API says what zone it is in, and the
+        browser converts it to the reader's own.
+        """
+        if isinstance(value, datetime):
+            if value.tzinfo is None:
+                return value.replace(tzinfo=timezone.utc)
+            return value.astimezone(timezone.utc)
+        return value
 
 
 # ---------------------------------------------------------------------------

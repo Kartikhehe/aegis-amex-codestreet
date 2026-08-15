@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router';
 import {
   Box,
   Button,
@@ -7,6 +8,7 @@ import {
   Divider,
   Drawer,
   IconButton,
+  Link,
   Stack,
   Typography,
 } from '@mui/material';
@@ -14,7 +16,9 @@ import { formatCurrency, formatDateTime, formatLatency, formatScore } from 'aegi
 import { useDecision, useOpenDispute } from 'aegis/hooks';
 import { useSnackbar } from 'notistack';
 import { useBreakpoints } from 'providers/BreakpointsProvider';
+import paths from 'routes/paths';
 import IconifyIcon from 'components/base/IconifyIcon';
+import { DrillChip } from './DateRangeFilter';
 import DecisionFlow from './DecisionFlow';
 import { Hash } from './Mono';
 import Mono from './Mono';
@@ -129,6 +133,17 @@ const MemberView = ({ decision }) => (
 );
 
 const DecisionBody = ({ decision, onClose, onMaximise }) => {
+  const navigate = useNavigate();
+
+  /** Open this agent on the Agents page, optionally pre-filtered by window. */
+  const openAgent = (agentId, rangeKey, extra = {}) => {
+    const query = new URLSearchParams({ agent: agentId });
+    if (rangeKey) query.set('range', rangeKey);
+    if (extra.merchant) query.set('merchant', extra.merchant);
+    navigate(`${paths.aegisAgents}?${query}`);
+    onClose?.();
+  };
+
   const [memberView, setMemberView] = useState(false);
   const { trigger: openDispute, isMutating } = useOpenDispute();
   const { enqueueSnackbar } = useSnackbar();
@@ -329,10 +344,35 @@ const DecisionBody = ({ decision, onClose, onMaximise }) => {
 
             <Section title="Mandate" term="mandate">
               <Stack spacing={1}>
-                <Field label="Agent">{decision.agent_name || decision.agent_id}</Field>
+                {/* The agent name opens that agent. A reader who asks "what
+                    else has this thing been doing?" should not have to go to
+                    another page and search for it by hand. */}
+                <Field label="Agent">
+                  <Link
+                    component="button"
+                    type="button"
+                    underline="hover"
+                    onClick={() => openAgent(decision.agent_id)}
+                    sx={{ textAlign: 'right', fontWeight: 600 }}
+                  >
+                    {decision.agent_name || decision.agent_id}
+                  </Link>
+                </Field>
                 <Field label="Operator" mono>
                   {decision.operator_id}
                 </Field>
+                <Stack direction="row" spacing={1} sx={{ pt: 0.5, flexWrap: 'wrap', gap: 1 }}>
+                  <DrillChip
+                    label="This agent's decisions today"
+                    icon="material-symbols:today-outline-rounded"
+                    onClick={() => openAgent(decision.agent_id, 'today')}
+                  />
+                  <DrillChip
+                    label="Last 7 days"
+                    icon="material-symbols:date-range-outline-rounded"
+                    onClick={() => openAgent(decision.agent_id, 'd7')}
+                  />
+                </Stack>
               </Stack>
             </Section>
 
@@ -352,7 +392,14 @@ const DecisionBody = ({ decision, onClose, onMaximise }) => {
                 </Button>
               }
             >
-              <DecisionFlow decision={decision} />
+              <DecisionFlow
+                decision={decision}
+                onDrill={(drill) =>
+                  openAgent(decision.agent_id, drill.range, {
+                    merchant: drill.range === 'd30' ? decision.merchant_id : undefined,
+                  })
+                }
+              />
             </Section>
 
             <Divider />

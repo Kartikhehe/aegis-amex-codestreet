@@ -3,6 +3,7 @@ import { Box, Chip, Collapse, Stack, Tooltip, Typography } from '@mui/material';
 import { buildDecisionFlow, shortHash } from 'aegis/decisionFlow';
 import { formatDateTime, formatRuleName } from 'aegis/format';
 import IconifyIcon from 'components/base/IconifyIcon';
+import { DrillChip } from './DateRangeFilter';
 import Mono from './Mono';
 
 /**
@@ -31,6 +32,21 @@ const STATUS = {
   passed: { color: 'success', icon: 'material-symbols:check-small-rounded' },
   skipped: { color: 'neutral', icon: 'material-symbols:remove-rounded' },
   not_reached: { color: 'neutral', icon: null },
+};
+
+/**
+ * Rules whose reason is a claim about OTHER decisions, and the window that
+ * would show them.
+ *
+ * "6 txns today (limit 6)" is a statement a reader should be able to check,
+ * not take on trust. Each entry turns the deciding rule into a link that opens
+ * exactly the decisions the rule counted.
+ */
+const RULE_DRILL = {
+  velocity_limit: { range: 'today', label: "See today's decisions by this agent" },
+  amount_above_ceiling: { range: 'today', label: "See today's spend by this agent" },
+  novel_merchant: { range: 'd30', label: 'See this agent at this merchant' },
+  agent_breaker: { range: 'd7', label: "See this agent's recent decisions" },
 };
 
 const RAIL_X = 13; // centre of the node column, in px
@@ -107,10 +123,11 @@ const Node = ({ status, decisive, isClearance }) => {
   );
 };
 
-const Step = ({ step, last }) => {
+const Step = ({ step, last, onDrill }) => {
   const config = STATUS[step.status] ?? STATUS.passed;
   const color = step.decisive && step.isClearance ? 'success' : config.color;
   const unreached = step.status === 'not_reached';
+  const drill = RULE_DRILL[step.name];
 
   return (
     <Box>
@@ -169,6 +186,16 @@ const Step = ({ step, last }) => {
               {step.detail}
             </Mono>
           )}
+          {/* The deciding rule's claim, made checkable. */}
+          {step.decisive && drill && onDrill && (
+            <Box sx={{ mt: 1 }}>
+              <DrillChip
+                label={drill.label}
+                icon="material-symbols:arrow-outward-rounded"
+                onClick={() => onDrill(drill)}
+              />
+            </Box>
+          )}
         </Box>
       </Stack>
       {!last && <Rail walked={!unreached} />}
@@ -177,7 +204,7 @@ const Step = ({ step, last }) => {
 };
 
 /** A stage: a labelled band of the flow, with its own rail segment. */
-const Stage = ({ stage, index, expandedAll, isLast }) => {
+const Stage = ({ stage, index, expandedAll, isLast, onDrill }) => {
   const [open, setOpen] = useState(false);
   const expanded = expandedAll || open;
 
@@ -249,7 +276,12 @@ const Stage = ({ stage, index, expandedAll, isLast }) => {
         ) : (
           <>
             {shown.map((step, i) => (
-              <Step key={step.name} step={step} last={i === shown.length - 1 && !hidden} />
+              <Step
+                key={step.name}
+                step={step}
+                last={i === shown.length - 1 && !hidden}
+                onDrill={onDrill}
+              />
             ))}
 
             {hidden > 0 && (
@@ -530,7 +562,7 @@ const HumanStep = ({ stepUp }) => {
   );
 };
 
-const DecisionFlow = ({ decision, expanded = false }) => {
+const DecisionFlow = ({ decision, expanded = false, onDrill }) => {
   const flow = buildDecisionFlow(decision);
   if (!flow) return null;
   const tone = VERDICT_TONE[flow.verdict] ?? 'neutral';
@@ -615,6 +647,7 @@ const DecisionFlow = ({ decision, expanded = false }) => {
             index={index}
             expandedAll={expanded}
             isLast={index === flow.stages.length - 1}
+            onDrill={onDrill}
           />
         ))}
 

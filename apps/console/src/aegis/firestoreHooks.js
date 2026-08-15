@@ -43,13 +43,20 @@ const normaliseDecision = (data) => ({
  * too is not redundant: without it Firestore would reject the whole query for a
  * non-operator, and the console would show nothing rather than their own rows.
  */
-export const useLiveDecisions = (swrResult, { max = 60, scope } = {}) => {
+export const useLiveDecisions = (swrResult, { max = 60, scope, enabled = true } = {}) => {
   const [live, setLive] = useState(null);
   const [subscribed, setSubscribed] = useState(false);
   const scopeKey = JSON.stringify(scope ?? {});
 
   useEffect(() => {
-    if (!canSubscribe()) return undefined;
+    // `enabled` is false when the caller has narrowed to a fixed window. A
+    // live feed would keep pushing the newest rows over a filtered result and
+    // silently contradict the filter the user just chose.
+    if (!enabled || !canSubscribe()) {
+      setSubscribed(false);
+      setLive(null);
+      return undefined;
+    }
 
     const constraints = [];
     if (scope?.operator_id) constraints.push(where('operator_id', '==', scope.operator_id));
@@ -78,14 +85,14 @@ export const useLiveDecisions = (swrResult, { max = 60, scope } = {}) => {
     );
 
     return () => unsubscribe();
-  }, [max, scopeKey]);
+  }, [max, scopeKey, enabled]);
 
   return useMemo(() => {
-    if (subscribed && live) {
+    if (enabled && subscribed && live) {
       return { ...swrResult, data: { items: live, total: live.length }, isLive: true };
     }
     return { ...swrResult, isLive: false };
-  }, [subscribed, live, swrResult]);
+  }, [enabled, subscribed, live, swrResult]);
 };
 
 /** Live incidents feed. Same fallback contract. */

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Alert, Box, Grid, Paper, Stack, Typography } from '@mui/material';
 import BlockRateChart from 'aegis/charts/BlockRateChart';
 import ExposureChart from 'aegis/charts/ExposureChart';
+import DateRangeFilter, { buildRange } from 'aegis/components/DateRangeFilter';
 import DecisionDrawer from 'aegis/components/DecisionDrawer';
 import DecisionStream from 'aegis/components/DecisionStream';
 import EmptyState from 'aegis/components/EmptyState';
@@ -86,7 +87,16 @@ const FleetOverview = () => {
   const { data: overview } = useOverview(24);
   // Firestore when it is available, REST when it is not. The screen does not
   // need to know which, and shows a "live" marker only when it truly is.
-  const decisionsQuery = useLiveDecisions(useDecisions({ limit: 60 }), { max: 60 });
+  const [streamRange, setStreamRange] = useState(() => buildRange('all'));
+  const windowed = Boolean(streamRange.since || streamRange.until);
+
+  const restDecisions = useDecisions({
+    limit: 60,
+    ...(streamRange.since ? { since: streamRange.since } : {}),
+    ...(streamRange.until ? { until: streamRange.until } : {}),
+  });
+  // Live updates only make sense for an open-ended window.
+  const decisionsQuery = useLiveDecisions(restDecisions, { max: 60, enabled: !windowed });
   const incidentsQuery = useLiveIncidents(useIncidents({ limit: 8 }), { max: 8 });
   const { data: decisionPage } = decisionsQuery;
   const { data: incidents } = incidentsQuery;
@@ -176,11 +186,18 @@ const FleetOverview = () => {
                   </Typography>
                 )}
               </Stack>
-              {shadowRunning && (
-                <Typography variant="monoCaption" sx={{ color: 'warning.main' }}>
-                  shadow policy running
-                </Typography>
-              )}
+              <Stack direction="row" spacing={1} alignItems="center">
+                {shadowRunning && (
+                  <Typography variant="monoCaption" sx={{ color: 'warning.main' }}>
+                    shadow policy running
+                  </Typography>
+                )}
+                {/* Narrowing the stream turns off the live feed: a window that
+                    ends in the past cannot also be receiving new rows, and
+                    pretending otherwise would be a lie about what is on
+                    screen. */}
+                <DateRangeFilter value={streamRange} onChange={setStreamRange} />
+              </Stack>
             </Stack>
 
             <Box sx={{ flex: 1, minHeight: 0 }}>

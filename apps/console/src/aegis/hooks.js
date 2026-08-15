@@ -35,8 +35,13 @@ export const useRearmFleet = () =>
 // Decisions
 // ---------------------------------------------------------------------------
 
+// Passing null skips the request entirely -- SWR treats a null key as "not
+// ready", which is what a page with nothing selected yet needs.
 export const useDecisions = (params = {}, config) =>
-  useSWR([endpoints.decisions, { params }], axiosFetcher, { ...LIVE, ...config });
+  useSWR(params === null ? null : [endpoints.decisions, { params }], axiosFetcher, {
+    ...LIVE,
+    ...config,
+  });
 
 export const useDecision = (actionId, config) =>
   useSWR(actionId ? [endpoints.decision(actionId)] : null, axiosFetcher, {

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router';
 import {
   Alert,
   Box,
@@ -15,6 +16,7 @@ import {
   Typography,
 } from '@mui/material';
 import ConformanceSparkline from 'aegis/charts/ConformanceSparkline';
+import DateRangeFilter, { buildRange } from 'aegis/components/DateRangeFilter';
 import DecisionDrawer from 'aegis/components/DecisionDrawer';
 import DecisionStream from 'aegis/components/DecisionStream';
 import DelegationTree from 'aegis/components/DelegationTree';
@@ -24,7 +26,7 @@ import PageHeader from 'aegis/components/PageHeader';
 import SpawnSubAgentDialog from 'aegis/components/SpawnSubAgentDialog';
 import Term from 'aegis/components/Term';
 import { formatCurrency, formatDateTime, formatScore } from 'aegis/format';
-import { useAgent, useAgents, useRevokeAgent, useSuspendAgent } from 'aegis/hooks';
+import { useAgent, useAgents, useDecisions, useRevokeAgent, useSuspendAgent } from 'aegis/hooks';
 import { useSnackbar } from 'notistack';
 import IconifyIcon from 'components/base/IconifyIcon';
 
@@ -182,8 +184,36 @@ const Agents = () => {
   const [revokeOpen, setRevokeOpen] = useState(false);
   const [drawerAction, setDrawerAction] = useState(null);
 
+  // The decisions list is its own query rather than the fixed `recent_decisions`
+  // on the agent, so it can be filtered by date and paged past 20 rows.
+  // Deep links from elsewhere in the console: ?agent= selects, ?range= sets
+  // the window, ?merchant= narrows further. This is what makes a claim on the
+  // fleet page ("6 txns today") openable rather than merely readable.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const linkedAgent = searchParams.get('agent');
+  const linkedMerchant = searchParams.get('merchant');
+
+  const [range, setRange] = useState(() => buildRange(searchParams.get('range') || 'd7'));
+  const [expanded, setExpanded] = useState(Boolean(searchParams.get('range')));
+
   const { data: agents, mutate: refetchAgents } = useAgents();
   const { data: detail, mutate: refetchDetail } = useAgent(selectedId);
+  // A deep link selects its agent as soon as the list can resolve it.
+  useEffect(() => {
+    if (linkedAgent && linkedAgent !== selectedId) setSelectedId(linkedAgent);
+  }, [linkedAgent, selectedId]);
+
+  const { data: agentDecisions } = useDecisions(
+    selectedId
+      ? {
+          agent_id: selectedId,
+          limit: expanded ? 200 : 20,
+          ...(linkedMerchant ? { merchant_id: linkedMerchant } : {}),
+          ...(range.since ? { since: range.since } : {}),
+          ...(range.until ? { until: range.until } : {}),
+        }
+      : null,
+  );
   const { trigger: revoke, isMutating: revoking } = useRevokeAgent(selectedId);
   const { trigger: suspend } = useSuspendAgent(selectedId);
   const { enqueueSnackbar } = useSnackbar();
@@ -477,17 +507,68 @@ const Agents = () => {
                   </Paper>
                 </Grid>
 
-                {/* recent decisions */}
+                {/* recent decisions, filterable and expandable */}
                 <Grid size={{ xs: 12, md: 6 }}>
                   <Paper sx={{ p: 0, overflow: 'hidden' }}>
-                    <Typography variant="h6" sx={{ fontWeight: 700, p: 2.5, pb: 1.5 }}>
-                      Recent decisions
-                    </Typography>
-                    <Box sx={{ maxHeight: 320, overflowY: 'auto' }}>
+                    <Stack
+                      direction="row"
+                      alignItems="center"
+                      justifyContent="space-between"
+                      spacing={1}
+                      sx={{ p: 2.5, pb: 1.5, flexWrap: 'wrap', rowGap: 1 }}
+                    >
+                      <Stack direction="row" spacing={1} alignItems="baseline">
+                        <Typography variant="h6" sx={{ fontWeight: 700 }}>
+                          Decisions
+                        </Typography>
+                        {agentDecisions?.total != null && (
+                          <Mono variant="monoCaption" sx={{ color: 'text.disabled' }}>
+                            {agentDecisions.total.toLocaleString('en-IN')}
+                          </Mono>
+                        )}
+                      </Stack>
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        {/* An active narrowing must be visible and removable,
+                            or a deep link silently hides rows forever. */}
+                        {linkedMerchant && (
+                          <Chip
+                            size="small"
+                            label="This merchant"
+                            onDelete={() => {
+                              searchParams.delete('merchant');
+                              setSearchParams(searchParams, { replace: true });
+                            }}
+                          />
+                        )}
+                        <DateRangeFilter value={range} onChange={setRange} />
+                        <Button
+                          size="small"
+                          onClick={() => setExpanded((open) => !open)}
+                          sx={{ color: 'text.secondary' }}
+                          startIcon={
+                            <IconifyIcon
+                              icon={
+                                expanded
+                                  ? 'material-symbols:close-fullscreen-rounded'
+                                  : 'material-symbols:open-in-full-rounded'
+                              }
+                            />
+                          }
+                        >
+                          {expanded ? 'Collapse' : 'Expand'}
+                        </Button>
+                      </Stack>
+                    </Stack>
+                    <Box
+                      sx={{
+                        maxHeight: expanded ? 'none' : 320,
+                        overflowY: expanded ? 'visible' : 'auto',
+                      }}
+                    >
                       <DecisionStream
-                        decisions={detail?.recent_decisions ?? []}
+                        decisions={agentDecisions?.items ?? []}
                         onSelect={(decision) => setDrawerAction(decision.action_id)}
-                        maxRows={20}
+                        maxRows={expanded ? 200 : 20}
                       />
                     </Box>
                   </Paper>
