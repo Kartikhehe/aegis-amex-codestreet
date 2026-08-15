@@ -8,21 +8,14 @@ import {
   Drawer,
   IconButton,
   Stack,
-  Tooltip,
   Typography,
 } from '@mui/material';
-import {
-  formatCurrency,
-  formatDateTime,
-  formatLatency,
-  formatReason,
-  formatRuleName,
-  formatScore,
-} from 'aegis/format';
+import { formatCurrency, formatDateTime, formatLatency, formatScore } from 'aegis/format';
 import { useDecision, useOpenDispute } from 'aegis/hooks';
 import { useSnackbar } from 'notistack';
 import { useBreakpoints } from 'providers/BreakpointsProvider';
 import IconifyIcon from 'components/base/IconifyIcon';
+import DecisionFlow from './DecisionFlow';
 import { Hash } from './Mono';
 import Mono from './Mono';
 import Term from './Term';
@@ -135,7 +128,7 @@ const MemberView = ({ decision }) => (
   </Stack>
 );
 
-const DecisionBody = ({ decision, onClose }) => {
+const DecisionBody = ({ decision, onClose, onMaximise }) => {
   const [memberView, setMemberView] = useState(false);
   const { trigger: openDispute, isMutating } = useOpenDispute();
   const { enqueueSnackbar } = useSnackbar();
@@ -345,122 +338,21 @@ const DecisionBody = ({ decision, onClose }) => {
 
             <Divider />
 
-            <Section title="Conformance" term="conformance">
-              {scored ? (
-                <Stack spacing={1}>
-                  <Field label="Score" mono>
-                    {formatScore(conformance.score)}
-                  </Field>
-                  {conformance.rationale && (
-                    <Typography
-                      variant="body2"
-                      sx={{ color: 'text.secondary', lineHeight: 1.6, pt: 0.5 }}
-                    >
-                      {conformance.rationale}
-                    </Typography>
-                  )}
-                  <Field label="Model">
-                    <Mono variant="monoCaption">{conformance.model_version || '—'}</Mono>
-                  </Field>
-                  <Field label={<Term term="prompt_hash">Prompt hash</Term>}>
-                    <Hash value={conformance.prompt_hash} />
-                  </Field>
-                </Stack>
-              ) : (
-                <Stack
-                  direction="row"
-                  spacing={1.5}
-                  alignItems="flex-start"
-                  sx={(theme) => ({
-                    p: 1.5,
-                    borderRadius: 2,
-                    border: '1px solid',
-                    borderColor: `rgba(${theme.vars.palette.warning.mainChannel} / 0.4)`,
-                    backgroundColor: `rgba(${theme.vars.palette.warning.mainChannel} / 0.1)`,
-                  })}
+            <Section
+              title="How it was decided"
+              term="winning_rule"
+              action={
+                <Button
+                  size="small"
+                  onClick={onMaximise}
+                  startIcon={<IconifyIcon icon="material-symbols:open-in-full-rounded" />}
+                  sx={{ color: 'text.secondary' }}
                 >
-                  <IconifyIcon
-                    icon="material-symbols:warning-rounded"
-                    sx={{ color: 'warning.main', fontSize: 18, mt: 0.25 }}
-                  />
-                  <Typography variant="body2">
-                    Conformance could not be established for this transaction, so the engine{' '}
-                    <Term term="fail_closed">failed closed</Term> and withheld approval.
-                  </Typography>
-                </Stack>
-              )}
-            </Section>
-
-            <Divider />
-
-            <Section title="Rules fired" term="winning_rule">
-              <Stack spacing={0.5}>
-                {(decision.rules_fired ?? []).map((rule, index) => {
-                  const won = rule.matched;
-                  return (
-                    <Stack
-                      key={`${rule.rule_name}-${index}`}
-                      direction="row"
-                      spacing={1.5}
-                      alignItems="center"
-                      sx={(theme) => ({
-                        px: 1.5,
-                        py: 0.875,
-                        borderRadius: 1.5,
-                        border: '1px solid',
-                        borderColor: won
-                          ? `rgba(${theme.vars.palette.primary.mainChannel} / 0.45)`
-                          : 'transparent',
-                        backgroundColor: won
-                          ? `rgba(${theme.vars.palette.primary.mainChannel} / 0.1)`
-                          : theme.vars.palette.background.elevation2,
-                      })}
-                    >
-                      <IconifyIcon
-                        icon={
-                          won
-                            ? 'material-symbols:gavel-rounded'
-                            : rule.skipped
-                              ? 'material-symbols:skip-next-rounded'
-                              : 'material-symbols:check-small-rounded'
-                        }
-                        sx={{
-                          fontSize: 16,
-                          flexShrink: 0,
-                          color: won
-                            ? 'primary.main'
-                            : rule.skipped
-                              ? 'warning.main'
-                              : 'text.disabled',
-                        }}
-                      />
-                      <Mono
-                        variant="monoSmall"
-                        sx={{
-                          flex: 1,
-                          minWidth: 0,
-                          fontWeight: won ? 700 : 400,
-                          color: won ? 'text.primary' : 'text.secondary',
-                        }}
-                      >
-                        {formatRuleName(rule.rule_name)}
-                      </Mono>
-                      {rule.skipped && (
-                        <Tooltip title={rule.detail || 'Rule could not run'}>
-                          <Typography variant="monoCaption" sx={{ color: 'warning.main' }}>
-                            skipped
-                          </Typography>
-                        </Tooltip>
-                      )}
-                      {won && (
-                        <Typography variant="monoCaption" sx={{ color: 'primary.main' }}>
-                          {formatReason(decision.reason_code)}
-                        </Typography>
-                      )}
-                    </Stack>
-                  );
-                })}
-              </Stack>
+                  Expand
+                </Button>
+              }
+            >
+              <DecisionFlow decision={decision} />
             </Section>
 
             <Divider />
@@ -484,49 +376,6 @@ const DecisionBody = ({ decision, onClose }) => {
                   </Stack>
                 ))}
               </Stack>
-            </Section>
-
-            <Divider />
-
-            <Section title="Features">
-              <Stack spacing={0.75}>
-                {Object.entries(decision.features ?? {}).map(([key, value]) => (
-                  <Field key={key} label={key.replace(/_/g, ' ')} mono>
-                    {value === null
-                      ? '—'
-                      : typeof value === 'boolean'
-                        ? String(value)
-                        : Array.isArray(value)
-                          ? value.join(', ') || '—'
-                          : String(value)}
-                  </Field>
-                ))}
-              </Stack>
-            </Section>
-
-            <Divider />
-
-            <Section title="Ledger" term="hash_chain">
-              {decision.ledger ? (
-                <Stack spacing={1}>
-                  <Field label="Sequence" mono>
-                    #{decision.ledger.sequence}
-                  </Field>
-                  <Field label={<Term term="prev_hash">Previous hash</Term>}>
-                    <Hash value={decision.ledger.prev_hash} />
-                  </Field>
-                  <Field label={<Term term="self_hash">Record hash</Term>}>
-                    <Hash value={decision.ledger.self_hash} />
-                  </Field>
-                  <Field label={<Term term="ruleset_hash">Ruleset</Term>}>
-                    <Hash value={decision.ruleset_hash} />
-                  </Field>
-                </Stack>
-              ) : (
-                <Typography variant="body2" sx={{ color: 'text.disabled' }}>
-                  No ledger record loaded for this decision.
-                </Typography>
-              )}
             </Section>
           </>
         )}
@@ -571,10 +420,72 @@ const DecisionBody = ({ decision, onClose }) => {
   );
 };
 
+/**
+ * The maximised flow.
+ *
+ * The drawer is 580px wide, which is right for reading a verdict and wrong for
+ * following a sixteen-step pipeline. This opens the same flow with every check
+ * expanded and room to breathe -- the view to put on a projector when someone
+ * asks to see exactly what the engine did.
+ *
+ * Columns on a wide screen, a single scrolling column otherwise. The stages are
+ * independent, so they reflow without losing their order.
+ */
+const MaximisedFlow = ({ decision, open, onClose }) => (
+  <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth scroll="paper">
+    <Stack
+      direction="row"
+      alignItems="center"
+      justifyContent="space-between"
+      spacing={2}
+      sx={(theme) => ({
+        px: 3,
+        py: 2,
+        borderBottom: '1px solid',
+        borderColor: theme.vars.palette.divider,
+      })}
+    >
+      <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+        <Typography variant="h6" sx={{ fontWeight: 700 }}>
+          How this decision was reached
+        </Typography>
+        <Stack direction="row" spacing={1.5} alignItems="center" sx={{ flexWrap: 'wrap' }}>
+          <Mono variant="monoCaption" sx={{ color: 'text.disabled' }}>
+            {decision.action_id}
+          </Mono>
+          <Typography variant="caption" sx={{ color: 'text.disabled' }}>
+            {formatDateTime(decision.decided_at)}
+          </Typography>
+        </Stack>
+      </Stack>
+      <Stack direction="row" spacing={1.5} alignItems="center">
+        <VerdictChip
+          verdict={decision.verdict}
+          stepUpState={decision.step_up_state}
+          size="medium"
+        />
+        <IconButton size="small" onClick={onClose} aria-label="Close">
+          <IconifyIcon icon="material-symbols:close-rounded" />
+        </IconButton>
+      </Stack>
+    </Stack>
+
+    <Box sx={{ p: 3, overflowY: 'auto' }}>
+      {/* Plain language first: the reason is the answer, the flow is the
+          working. Someone should be able to stop reading after this line. */}
+      <Typography variant="body1" sx={{ mb: 3, maxWidth: '72ch' }}>
+        {decision.human_readable_reason}
+      </Typography>
+      <DecisionFlow decision={decision} expanded />
+    </Box>
+  </Dialog>
+);
+
 const DecisionDrawer = ({ actionId, open, onClose }) => {
   const { up } = useBreakpoints();
   const isDesktop = up('md');
   const { data, isLoading } = useDecision(open ? actionId : null);
+  const [maximised, setMaximised] = useState(false);
 
   const content =
     isLoading || !data ? (
@@ -584,30 +495,40 @@ const DecisionDrawer = ({ actionId, open, onClose }) => {
         </Typography>
       </Stack>
     ) : (
-      <DecisionBody decision={data} onClose={onClose} />
+      <DecisionBody decision={data} onClose={onClose} onMaximise={() => setMaximised(true)} />
     );
+
+  const maximisedFlow = data && (
+    <MaximisedFlow decision={data} open={maximised} onClose={() => setMaximised(false)} />
+  );
 
   if (isDesktop) {
     return (
-      <Drawer
-        anchor="right"
-        open={open}
-        onClose={onClose}
-        slotProps={{
-          paper: {
-            sx: { width: { md: 520, lg: 580 }, maxWidth: '100vw' },
-          },
-        }}
-      >
-        {content}
-      </Drawer>
+      <>
+        <Drawer
+          anchor="right"
+          open={open}
+          onClose={onClose}
+          slotProps={{
+            paper: {
+              sx: { width: { md: 520, lg: 580 }, maxWidth: '100vw' },
+            },
+          }}
+        >
+          {content}
+        </Drawer>
+        {maximisedFlow}
+      </>
     );
   }
 
   return (
-    <Dialog open={open} onClose={onClose} fullScreen>
-      {content}
-    </Dialog>
+    <>
+      <Dialog open={open} onClose={onClose} fullScreen>
+        {content}
+      </Dialog>
+      {maximisedFlow}
+    </>
   );
 };
 
