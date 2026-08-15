@@ -55,7 +55,13 @@ from ..engine.types import ActionRequest, CartItem, Mandate, utcnow
 from ..firestore import get_mirror, mint_custom_token
 from ..providers import ProviderUnavailable, get_providers
 from ..scoring import get_conformance_engine, get_idempotency_store, get_rate_limiter
-from ..storefront import get_storefront, parse_prompt, storefronts
+from ..storefront import (
+    SHOP_AGENT_CLASSES,
+    SHOP_GREETINGS,
+    get_storefront,
+    parse_prompt,
+    storefronts,
+)
 from ..service import (
     active_ruleset,
     agent_from_row,
@@ -1097,6 +1103,21 @@ def overview(db: DbSession, principal: CurrentUser, hours: int = Query(24, ge=1,
     wrongly_denied = [r for r in legitimate if r.verdict == "DENY"]
     false_block_rate = (len(wrongly_denied) / len(legitimate)) if legitimate else 0.0
 
+    # The same measurement over REAL traffic, where no ground-truth label
+    # exists. A block counts as false only once a card member has said they
+    # wanted the purchase AND an operator has confirmed it: one person alone
+    # must not be able to move a published metric.
+    #
+    # Reported-but-unconfirmed sits in `awaiting` so the number is never
+    # quietly inflated by a queue nobody has looked at.
+    denied_rows = [r for r in rows if r.verdict == "DENY"]
+    reported_wrong = [r for r in denied_rows if r.block_report == "wrong"]
+    confirmed_false = [r for r in reported_wrong if r.block_report_confirmed is True]
+    awaiting_review = [r for r in reported_wrong if r.block_report_confirmed is None]
+    reported_false_block_rate = (
+        (len(confirmed_false) / len(denied_rows)) if denied_rows else 0.0
+    )
+
     # Secondary, always available: friction the member cleared themselves.
     approved_step_ups = sum(1 for r in rows if r.step_up_state in {"approved", "always_allowed"})
     step_up_approval_rate = (approved_step_ups / total) if total else 0.0
@@ -1195,6 +1216,10 @@ def overview(db: DbSession, principal: CurrentUser, hours: int = Query(24, ge=1,
         block_rate=round(block_rate, 4),
         false_block_rate=round(false_block_rate, 4),
         false_block_sample_size=len(legitimate),
+        reported_false_block_rate=round(reported_false_block_rate, 4),
+        reported_false_blocks=len(confirmed_false),
+        block_reports_awaiting_review=len(awaiting_review),
+        blocks_in_window=len(denied_rows),
         step_up_approval_rate=round(step_up_approval_rate, 4),
         policy_stage=stage,
         ruleset_hash=rs.ruleset_hash,
@@ -1323,6 +1348,8 @@ def _decision_out(row: DecisionRow, agent: Optional[AgentRow]) -> s.DecisionOut:
         rules_fired=[s.RuleOutcomeOut(**r) for r in (row.rules_fired or [])],
         features=row.features or {},
         step_up_state=row.step_up_state,
+        block_report=row.block_report,
+        block_report_confirmed=row.block_report_confirmed,
         latency_ms=row.latency_ms or 0,
         decided_at=row.decided_at,
     )
@@ -1444,9 +1471,29 @@ def simulate_checkout(
         raise HTTPException(status_code=422, detail=detail)
 
     # An explicit ship-to from the storefront UI beats one inferred from prose.
-    ship_to = payload.ship_to or parsed.ship_to
-    if shop.ship_to_options and ship_to not in shop.ship_to_options:
-        ship_to = shop.ship_to_options[0]
+    # --- where the goods are going -----------------------------------------
+    #
+    # A shop with no delivery options -- a hotel stay, a flight, a tank of fuel
+    # -- sends NO destination. The engine only compares when both sides declare
+    # one, so this correctly skips the check rather than inventing a delivery
+    # constraint the card member never set.
+    #
+    # For shops that do deliver, the storefront works in tokens ("home",
+    # "office") while a mandate holds a real address. Passing the token through
+    # would never match, so every delivered purchase would be denied for
+    # ship_to_mismatch -- which is exactly what happened. The token is resolved
+    # to the mandate's own address; only "other" stays unresolved, because an
+    # unfamiliar destination is precisely what the rule exists to catch.
+    ship_to: Optional[str] = None
+    if shop.ship_to_options:
+        token = payload.ship_to or parsed.ship_to
+        if token not in shop.ship_to_options:
+            token = shop.ship_to_options[0]
+        if token == "other":
+            ship_to = "Unrecognised delivery address"
+        else:
+            buyer = db.get(AgentRow, payload.agent_id)
+            ship_to = (buyer.ship_to if buyer else None) or token
 
     amount = parsed.total
     if amount <= 0:
@@ -1506,3 +1553,168 @@ def simulate_checkout(
         parse_note=parsed.note,
         decision=decision,
     )
+
+
+# --------------------------------------------------------------------------
+# False blocks, measured from real traffic
+#
+# The seeded corpus carries ground-truth labels, so its false-block rate is
+# exact. Real traffic has no such label -- nobody annotates a live purchase as
+# "legitimate" before it happens. These two endpoints supply the missing
+# signal: the card member says whether they actually wanted the purchase, and
+# an operator confirms it. Only confirmed reports count, because a metric that
+# any one person can move on their own is not a measurement.
+# --------------------------------------------------------------------------
+
+
+@router.post(
+    "/decisions/{action_id}/block-report",
+    response_model=s.BlockReportResponse,
+    tags=["decide"],
+)
+def report_block(
+    action_id: str,
+    payload: s.BlockReportRequest,
+    db: DbSession,
+    principal: CurrentUser,
+) -> s.BlockReportResponse:
+    """The card member says whether a block was wrong."""
+    row = db.get(DecisionRow, action_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Decision not found")
+    _assert_can_see_decision(principal, row)
+
+    if row.verdict != "DENY":
+        raise HTTPException(
+            status_code=409,
+            detail="Only a blocked purchase can be reported as wrongly blocked.",
+        )
+
+    row.block_report = payload.report
+    row.block_report_at = utcnow()
+    # A fresh report clears any previous ruling: an operator must look again.
+    row.block_report_confirmed = None
+    db.commit()
+    db.refresh(row)
+
+    return s.BlockReportResponse(
+        action_id=action_id,
+        block_report=row.block_report,
+        confirmed=row.block_report_confirmed,
+        message=(
+            "Thank you — we have flagged this for review."
+            if payload.report == "wrong"
+            else "Thank you — we will keep blocking purchases like this."
+        ),
+    )
+
+
+@router.post(
+    "/decisions/{action_id}/block-report/confirm",
+    response_model=s.BlockReportResponse,
+    tags=["decide"],
+)
+def confirm_block_report(
+    action_id: str,
+    payload: s.BlockReportConfirmRequest,
+    db: DbSession,
+    principal: CurrentUser,
+) -> s.BlockReportResponse:
+    """An operator rules on a member's report. Card members may not."""
+    if principal.role == Role.CARD_MEMBER:
+        raise HTTPException(
+            status_code=403,
+            detail="Only an operator can confirm a reported block.",
+        )
+
+    row = db.get(DecisionRow, action_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Decision not found")
+    _assert_can_see_decision(principal, row)
+
+    if row.block_report is None:
+        raise HTTPException(
+            status_code=409, detail="No card member has reported this block."
+        )
+
+    row.block_report_confirmed = payload.confirmed
+    db.commit()
+    db.refresh(row)
+
+    return s.BlockReportResponse(
+        action_id=action_id,
+        block_report=row.block_report,
+        confirmed=row.block_report_confirmed,
+        message=(
+            "Confirmed as a false block. It now counts in the measured rate."
+            if payload.confirmed
+            else "Recorded as a correct block."
+        ),
+    )
+
+
+@router.get("/simulate/assistants", response_model=list[dict], tags=["simulator"])
+def list_assistants(db: DbSession, principal: CurrentUser) -> list[dict]:
+    """Ready-made shop + agent pairings for the simulator.
+
+    The simulator used to make a user choose an operator, then an agent, then a
+    shop -- three independent lists that can be combined into pairings no real
+    deployment would create, whose denials then say more about the pairing than
+    about the engine.
+
+    Here the server does the pairing: for each shop, the agent classes that
+    belong in it, resolved to a live, active agent. One choice, always valid.
+    The chosen agent is returned so the operator can still see and override it.
+    """
+    rows = list(db.scalars(select(AgentRow).where(AgentRow.status == "active")))
+
+    # ag_<class>_<n> -- the class prefix is how an agent maps to a mandate.
+    by_class: dict[str, list[AgentRow]] = {}
+    for row in rows:
+        if not row.agent_id.startswith("ag_"):
+            continue
+        stem = row.agent_id[3:]
+        if stem.endswith("_sub"):
+            continue
+        key = stem.rsplit("_", 1)[0]
+        by_class.setdefault(key, []).append(row)
+
+    visible = principal.role != Role.OPERATOR
+    assistants: list[dict] = []
+    for shop in storefronts():
+        merchant_id = shop["merchant_id"]
+        candidates: list[AgentRow] = []
+        for class_key in SHOP_AGENT_CLASSES.get(merchant_id, ()):
+            candidates.extend(by_class.get(class_key, []))
+        if visible and principal.operator_id:
+            candidates = [a for a in candidates if a.operator_id == principal.operator_id]
+        if not candidates:
+            # No agent belongs here. Offering the shop anyway would produce a
+            # 404 on the first message, so it is simply not offered.
+            continue
+
+        chosen = candidates[0]
+        assistants.append(
+            {
+                "shop": shop,
+                "greeting": SHOP_GREETINGS.get(
+                    merchant_id, f"Welcome to {shop['name']}. What do you need?"
+                ),
+                "agent": {
+                    "agent_id": chosen.agent_id,
+                    "name": chosen.name,
+                    "operator_id": chosen.operator_id,
+                    "purpose": chosen.purpose,
+                    "per_transaction_ceiling": str(chosen.per_transaction_ceiling),
+                    "daily_ceiling": str(chosen.daily_ceiling),
+                    "prohibited_attributes": list(chosen.prohibited_attributes or []),
+                },
+                # Alternatives, so the pairing is a sensible default rather
+                # than a cage.
+                "alternatives": [
+                    {"agent_id": a.agent_id, "name": a.name}
+                    for a in candidates[:12]
+                ],
+            }
+        )
+    return assistants

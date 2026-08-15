@@ -168,6 +168,11 @@ class DecisionOut(ApiModel):
     rules_fired: list[RuleOutcomeOut] = Field(default_factory=list)
     features: dict[str, Any] = Field(default_factory=dict)
     step_up_state: Optional[str] = None
+
+    # A later judgement ABOUT this decision, never part of it. The verdict is
+    # immutable and hashed; these say what people concluded afterwards.
+    block_report: Optional[str] = None
+    block_report_confirmed: Optional[bool] = None
     latency_ms: int = 0
     decided_at: datetime
     ledger: Optional[LedgerRefOut] = None
@@ -450,7 +455,15 @@ class OverviewResponse(ApiModel):
     p99_latency_ms: int = 0
     block_rate: float = 0.0
     false_block_rate: float = 0.0
-    false_block_sample_size: int = 0
+    false_block_sample_size: int
+
+    # The same measurement over real traffic: confirmed member reports over
+    # blocks in the window. Distinct from the seeded rate above, which is
+    # exact but only exists for generated data.
+    reported_false_block_rate: float = 0.0
+    reported_false_blocks: int = 0
+    block_reports_awaiting_review: int = 0
+    blocks_in_window: int = 0
     """How many labelled-legitimate actions the rate was measured over. A rate
     without its denominator is a number nobody can challenge."""
     step_up_approval_rate: float = 0.0
@@ -524,3 +537,37 @@ class SimulateCheckoutResponse(ApiModel):
     )
     parse_note: str = ""
     decision: DecisionOut
+
+
+class BlockReportRequest(ApiModel):
+    """A card member's verdict on a block that affected them."""
+
+    report: Literal["wrong", "correct"] = Field(
+        ...,
+        description=(
+            "'wrong' = the member did want this purchase; 'correct' = the block "
+            "was right. Only 'wrong', once an operator confirms it, counts as a "
+            "measured false block."
+        ),
+    )
+    note: str = Field("", max_length=500)
+
+
+class BlockReportResponse(ApiModel):
+    action_id: str
+    block_report: str
+    confirmed: Optional[bool] = None
+    message: str
+
+
+class BlockReportConfirmRequest(ApiModel):
+    """An operator's ruling on a member's report."""
+
+    confirmed: bool = Field(
+        ...,
+        description=(
+            "True if the operator agrees the block was wrong. This is what "
+            "enters the false-block rate -- a member's report alone does not, "
+            "or the metric could be moved by anyone who dislikes a decision."
+        ),
+    )

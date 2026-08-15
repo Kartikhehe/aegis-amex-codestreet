@@ -169,6 +169,9 @@ STOREFRONTS: tuple[Storefront, ...] = (
         kind="travel",
         tagline="Book domestic and international flights.",
         requires_login=True,
+        # Nothing is delivered: you board the plane. Declaring a destination
+        # here would invent a delivery constraint the card member never set.
+        ship_to_options=(),
         products=(
             Product("6e-dom", "Domestic economy fare", _d("4800"), ("flight", "fare", "ticket")),
             Product("6e-dom-flex", "Domestic flexi fare", _d("7200"), ("flexi", "refundable")),
@@ -176,7 +179,6 @@ STOREFRONTS: tuple[Storefront, ...] = (
             Product("6e-seat", "Seat selection", _d("600"), ("seat",)),
             Product("6e-bag", "Extra baggage 10kg", _d("1800"), ("baggage", "bag", "luggage")),
         ),
-        ship_to_options=("home",),
     ),
     Storefront(
         merchant_id="mch_tajhotels",
@@ -186,6 +188,7 @@ STOREFRONTS: tuple[Storefront, ...] = (
         tagline="Rooms and stays across India.",
         requires_login=True,
         requires_card_tap=True,
+        ship_to_options=(),
         products=(
             Product("taj-std", "Standard room, per night", _d("11500"), ("room", "night", "stay")),
             Product("taj-dlx", "Deluxe room, per night", _d("18500"), ("deluxe",)),
@@ -198,7 +201,6 @@ STOREFRONTS: tuple[Storefront, ...] = (
                 ("alcohol",),
             ),
         ),
-        ship_to_options=("home",),
     ),
     # --- fuel, MCC 5541 ---------------------------------------------------
     Storefront(
@@ -208,12 +210,12 @@ STOREFRONTS: tuple[Storefront, ...] = (
         kind="fuel",
         tagline="Fuel and on-the-road essentials.",
         requires_card_tap=True,
+        ship_to_options=(),
         products=(
             Product("io-petrol", "Petrol, per litre", _d("106"), ("petrol", "fuel", "gas")),
             Product("io-diesel", "Diesel, per litre", _d("94"), ("diesel",)),
             Product("io-wash", "Car wash", _d("350"), ("wash", "car wash")),
         ),
-        ship_to_options=("home",),
     ),
     # --- office supplies, MCC 5943 ---------------------------------------
     Storefront(
@@ -268,6 +270,37 @@ STOREFRONTS: tuple[Storefront, ...] = (
 )
 
 BY_ID: dict[str, Storefront] = {s.merchant_id: s for s in STOREFRONTS}
+
+# Which kind of agent belongs in which shop.
+#
+# An operator does not send a pantry agent to book a hotel, and making a user
+# assemble that pairing by hand invites combinations no real deployment would
+# ever create -- then shows them a denial that says more about the pairing than
+# about the engine. Mapping shop -> mandate class lets the simulator pick a
+# sensible agent automatically and keeps the choice to one decision.
+#
+# Ordered by preference: the first class with a live agent wins.
+SHOP_AGENT_CLASSES: dict[str, tuple[str, ...]] = {
+    "mch_freshmart": ("household_pantry", "travel_snacks"),
+    "mch_freshmart_gift": ("household_pantry",),
+    "mch_indigo": ("business_travel", "commuter_transport"),
+    "mch_tajhotels": ("business_travel",),
+    "mch_indianoil": ("fleet_fuel", "commuter_transport"),
+    "mch_amazonbiz": ("office_supplies", "broad_procurement"),
+    "mch_wazirx": ("broad_procurement", "household_pantry"),
+}
+
+# How each shop's assistant introduces itself. The simulator is meant to feel
+# like talking to something deployed, not like filling in a form.
+SHOP_GREETINGS: dict[str, str] = {
+    "mch_freshmart": "Hi — I do the grocery run for this household. What do you need?",
+    "mch_freshmart_gift": "Gift cards and vouchers counter. What are you after?",
+    "mch_indigo": "I book flights for the team. Where are you headed?",
+    "mch_tajhotels": "I handle hotel bookings. Which city and how many nights?",
+    "mch_indianoil": "Fuel stop. How much are we filling today?",
+    "mch_amazonbiz": "Office supplies desk. What does the office need?",
+    "mch_wazirx": "Digital asset desk. What would you like to buy?",
+}
 
 
 def storefronts() -> list[dict]:
@@ -490,7 +523,11 @@ _LLM_SCHEMA = {
         "ship_to": {"type": "string"},
         "sold_here": {
             "type": "boolean",
-            "description": "False if this shop plausibly does not sell these items at all.",
+            "description": (
+                "False ONLY when the request is unrelated to this business. "
+                "A hotel selling coffee is true; a fuel station selling "
+                "flights is false."
+            ),
         },
     },
     "required": ["items", "ship_to", "sold_here"],
@@ -577,8 +614,12 @@ def parse_with_llm(prompt: str, shop: Storefront) -> ParsedCart | None:
                         "price in INR for that item.\n"
                         "- unit_amount is the price of ONE unit, in INR, never the "
                         "line total.\n"
-                        "- Set sold_here=false only if this type of shop would not "
-                        "sell these goods at all.\n"
+                        "- Be GENEROUS about what a shop sells. A hotel serves "
+                        "coffee and meals, a supermarket sells almost any "
+                        "grocery, an airline sells seats and baggage and "
+                        "onboard food. Only set sold_here=false when the "
+                        "request is genuinely unrelated to the business -- a "
+                        "petrol station does not sell air tickets.\n"
                         "- ship_to must be one of: "
                         + ", ".join(shop.ship_to_options)
                     ),

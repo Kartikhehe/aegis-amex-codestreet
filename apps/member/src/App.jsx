@@ -12,11 +12,13 @@ import {
   Toolbar,
   Typography,
   useColorScheme,
+  useMediaQuery,
 } from "@mui/material";
 import axios from "axios";
 import AgentAuthorityCard from "./components/AgentAuthorityCard";
 import Logo from "./components/Logo";
 import BlockedCard from "./components/BlockedCard";
+import CardSummary from "./components/CardSummary";
 import StepUpCard from "./components/StepUpCard";
 import endpoints from "./aegis/api";
 
@@ -134,6 +136,10 @@ const EmptyMessage = ({ title, body }) => (
 
 const App = () => {
   const { mode, setMode } = useColorScheme();
+  // Drives the layout switch: a phone gets one stacked column, a laptop gets
+  // the list beside a standing summary.
+  const upSm = useMediaQuery((theme) => theme.breakpoints.up("sm"));
+  const upMd = useMediaQuery((theme) => theme.breakpoints.up("md"));
   const [user, setUser] = useState(null);
   const [tab, setTab] = useState(0);
   const [decisions, setDecisions] = useState([]);
@@ -206,6 +212,19 @@ const App = () => {
     }
   };
 
+  // The member's verdict on a block. This is the only real-traffic source of
+  // a false-block rate -- nobody labels a live purchase as legitimate before
+  // it happens. An operator still has to confirm it before it counts.
+  const reportBlock = async (decision, report) => {
+    setBusy(true);
+    try {
+      await api.post(endpoints.blockReport(decision.action_id), { report });
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const togglePause = async (agent) => {
     setBusy(true);
     try {
@@ -230,63 +249,79 @@ const App = () => {
   return (
     <Box sx={{ pb: 10, minHeight: "100vh", bgcolor: "background.default" }}>
       <AppBar position="sticky" color="transparent" elevation={0}>
-        <Toolbar
+        <Box
           sx={(theme) => ({
             borderBottom: "1px solid",
             borderColor: theme.vars.palette.divider,
             backgroundColor: theme.vars.palette.background.paper,
           })}
         >
-          {/* The AEGIS mark. Shield only: the wordmark would crowd out the
-              member's own name, which is what this bar is actually for. */}
-          <Logo variant="mark" height={36} sx={{ mr: 1.25 }} />
+          {/* Contained, not edge-to-edge. A full-bleed bar on a 27" monitor is
+              what makes a phone layout look like a phone layout in a browser. */}
+          <Container maxWidth="lg" disableGutters>
+            <Toolbar sx={{ px: { xs: 2, sm: 3 } }}>
+              {/* Shield only: the wordmark would crowd out the member's own
+                  name, which is what this bar is actually for. */}
+              <Logo variant="mark" height={36} sx={{ mr: 1.25 }} />
 
-          <Stack sx={{ flex: 1, minWidth: 0 }}>
-            <Typography
-              variant="subtitle1"
-              sx={{ fontWeight: 700, lineHeight: 1.2 }}
+              <Stack sx={{ flex: 1, minWidth: 0 }}>
+                <Typography
+                  variant="subtitle1"
+                  sx={{ fontWeight: 700, lineHeight: 1.2 }}
+                >
+                  {user.name}
+                </Typography>
+                <Typography variant="caption" sx={{ color: "text.secondary" }}>
+                  {pending.length > 0
+                    ? `${pending.length} waiting for you`
+                    : "Nothing needs your attention"}
+                </Typography>
+              </Stack>
+
+              <IconButton
+                onClick={() => setMode(mode === "dark" ? "light" : "dark")}
+                aria-label={
+                  mode === "dark" ? "Switch to light mode" : "Switch to dark mode"
+                }
+                sx={{ color: "text.secondary" }}
+              >
+                <Box component="span" sx={{ fontSize: 20, lineHeight: 1 }}>
+                  {mode === "dark" ? "☀" : "☾"}
+                </Box>
+              </IconButton>
+            </Toolbar>
+
+            <Tabs
+              value={tab}
+              onChange={(_, value) => setTab(value)}
+              // Full-width tabs are right on a phone and wrong on a desktop,
+              // where three stretched tabs read as a placeholder.
+              variant={upSm ? "standard" : "fullWidth"}
+              sx={{ px: { xs: 0, sm: 3 }, minHeight: 44 }}
             >
-              {user.name}
-            </Typography>
-            <Typography variant="caption" sx={{ color: "text.secondary" }}>
-              {pending.length > 0
-                ? `${pending.length} waiting for you`
-                : "Nothing needs your attention"}
-            </Typography>
-          </Stack>
-
-          <IconButton
-            onClick={() => setMode(mode === "dark" ? "light" : "dark")}
-            aria-label={
-              mode === "dark" ? "Switch to light mode" : "Switch to dark mode"
-            }
-            sx={{ color: "text.secondary" }}
-          >
-            <Box component="span" sx={{ fontSize: 20, lineHeight: 1 }}>
-              {mode === "dark" ? "☀" : "☾"}
-            </Box>
-          </IconButton>
-        </Toolbar>
-
-        <Tabs
-          value={tab}
-          onChange={(_, value) => setTab(value)}
-          variant="fullWidth"
-          sx={(theme) => ({
-            backgroundColor: theme.vars.palette.background.paper,
-            borderBottom: "1px solid",
-            borderColor: theme.vars.palette.divider,
-          })}
-        >
-          <Tab
-            label={`Approvals${pending.length ? ` (${pending.length})` : ""}`}
-          />
-          <Tab label="Blocked" />
-          <Tab label="Agents" />
-        </Tabs>
+              <Tab
+                label={`Approvals${pending.length ? ` (${pending.length})` : ""}`}
+              />
+              <Tab label={`Blocked${blocked.length ? ` (${blocked.length})` : ""}`} />
+              <Tab label="Agents" />
+            </Tabs>
+          </Container>
+        </Box>
       </AppBar>
 
-      <Container maxWidth="sm" sx={{ pt: 3 }}>
+      <Container maxWidth="lg" sx={{ pt: 3 }}>
+        {/* One column on a phone; list + standing summary on a laptop. The
+            summary is the answer to "is my card generally under control?",
+            which the tabbed list on its own never gives. */}
+        <Box
+          sx={{
+            display: "grid",
+            gap: 3,
+            gridTemplateColumns: { xs: "1fr", md: "minmax(0, 1fr) 320px" },
+            alignItems: "start",
+          }}
+        >
+          <Box sx={{ minWidth: 0 }}>
         {tab === 0 &&
           (pending.length === 0 ? (
             <EmptyMessage
@@ -320,6 +355,7 @@ const App = () => {
                   decision={decision}
                   busy={busy}
                   onDispute={dispute}
+                  onReport={reportBlock}
                 />
               ))}
             </Stack>
@@ -343,6 +379,18 @@ const App = () => {
               ))}
             </Stack>
           ))}
+          </Box>
+
+          {upMd && (
+            <Box sx={{ position: "sticky", top: 96 }}>
+              <CardSummary
+                decisions={decisions}
+                agents={agents}
+                pending={pending.length}
+              />
+            </Box>
+          )}
+        </Box>
       </Container>
     </Box>
   );

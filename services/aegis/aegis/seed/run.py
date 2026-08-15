@@ -253,7 +253,7 @@ def _seed_agents(
                 card_member_id="cm_anita" if klass.key in {
                     "household_pantry", "travel_snacks", "team_meals"
                 } else f"cm_{klass.operator[3:]}",
-                name=f"{klass.label} agent {index + 1}",
+                name=dist.agent_display_name(klass.key, klass.label, index),
                 parent_agent_id=None,
                 depth=0,
                 status="active",
@@ -300,7 +300,7 @@ def _seed_agents(
                     agent_id=f"{agent_id}_sub",
                     operator_id=klass.operator,
                     card_member_id=row.card_member_id,
-                    name=f"{klass.label} sub-agent",
+                    name=f"{row.name} · Delegate",
                     parent_agent_id=agent_id,
                     depth=1,
                     status="active",

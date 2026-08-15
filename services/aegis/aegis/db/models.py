@@ -155,6 +155,21 @@ class DecisionRow(Base):
     step_up_state: Mapped[str | None] = mapped_column(String(16), index=True)
     step_up_resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # WRONGLY-BLOCKED REPORT, from the only person who can actually know.
+    #
+    # seed_legitimate above is ground truth the generator happens to have; real
+    # traffic has none, so without this the false-block rate could only ever be
+    # measured over synthetic data. A card member saying "I did want that" is
+    # the real-world signal, and an operator confirming it is what makes it
+    # countable. Stored on the decision, never in the hashed ledger payload:
+    # the verdict is immutable, and this is a later judgement ABOUT it.
+    block_report: Mapped[str | None] = mapped_column(String(16), index=True)
+    """'wrong' (member wanted it), 'correct' (member agrees), or null."""
+    block_report_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    block_report_confirmed: Mapped[bool | None] = mapped_column(Boolean, index=True)
+    """Set by an operator reviewing the member's report. Only confirmed
+    reports count toward the measured false-block rate."""
+
     latency_ms: Mapped[int] = mapped_column(Integer, default=0)
     decided_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, index=True, nullable=False

@@ -22,6 +22,7 @@ export const endpoints = {
   decisions: '/decisions',
   decision: (actionId) => `/decisions/${actionId}`,
   resolveStepUp: (actionId) => `/decisions/${actionId}/resolve`,
+  blockReport: (actionId) => `/decisions/${actionId}/block-report`,
 
   // agents
   agents: '/agents',

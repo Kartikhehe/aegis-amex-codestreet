@@ -35,6 +35,7 @@ export const endpoints = {
   operators: '/operators',
   agents: '/agents',
   storefronts: '/storefronts',
+  assistants: '/simulate/assistants',
   checkout: '/simulate/checkout',
   decision: (actionId) => `/decisions/${actionId}`,
 };

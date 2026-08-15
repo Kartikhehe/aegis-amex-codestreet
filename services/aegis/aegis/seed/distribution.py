@@ -545,3 +545,64 @@ def summary() -> dict[str, Any]:
         "action_mix": ACTION_MIX,
         "class_weights": {c.key: c.weight for c in MANDATE_CLASSES},
     }
+
+
+# ---------------------------------------------------------------------------
+# Agent naming
+#
+# Agents are named the way a real deployment would name them: by what they do
+# and WHERE they do it. "Household pantry agent 17" tells a viewer nothing and
+# makes a fleet of 240 look like padding; "Koramangala Pantry Runner" reads as
+# a thing somebody actually deployed.
+#
+# The name is display-only. `agent_id` remains ag_<class>_<n> and is what every
+# foreign key, ledger record and API path uses, so naming can change freely
+# without touching a single stored relationship.
+# ---------------------------------------------------------------------------
+
+# Indian metros and business districts -- the fleet reads as a real footprint.
+_SITES: tuple[str, ...] = (
+    "Koramangala", "Indiranagar", "Whitefield", "HSR Layout", "Jayanagar",
+    "Powai", "Andheri", "Bandra", "Lower Parel", "Worli",
+    "Gurugram", "Noida", "Saket", "Dwarka", "Rohini",
+    "Hitec City", "Gachibowli", "Banjara Hills", "Jubilee Hills",
+    "Salt Lake", "Park Street", "Alipore",
+    "T Nagar", "Adyar", "Velachery", "Guindy",
+    "Kharadi", "Baner", "Hinjewadi", "Viman Nagar",
+    "Vastrapur", "Satellite", "Prahlad Nagar",
+    "Aundh", "Magarpatta", "Yerwada",
+)
+
+# One role noun per mandate class. Chosen so the name says what it BUYS, which
+# is the thing an operator actually needs to recognise in a list.
+_ROLES: dict[str, str] = {
+    "household_pantry": "Pantry Runner",
+    "office_supplies": "Office Stores",
+    "cloud_infra": "Cloud Spend",
+    "business_travel": "Travel Desk",
+    "team_meals": "Team Meals",
+    "fleet_fuel": "Fleet Fuel",
+    "facilities": "Facilities",
+    "workplace_health": "Wellbeing",
+    "broad_procurement": "Procurement",
+    "commuter_transport": "Commute",
+    "travel_snacks": "Travel Incidentals",
+    "software_licences": "Licence Desk",
+}
+
+
+def agent_display_name(class_key: str, label: str, index: int) -> str:
+    """A plausible real-world name for the nth agent of a class.
+
+    Deterministic: the same (class, index) always yields the same name, so a
+    reseed does not silently reshuffle every agent's identity.
+
+    Sites cycle and a suffix is added once they wrap, which keeps names unique
+    without ever printing a bare "agent 41".
+    """
+    role = _ROLES.get(class_key, label)
+    site = _SITES[index % len(_SITES)]
+    lap = index // len(_SITES)
+    # Second lap onwards gets a unit marker rather than a naked number.
+    suffix = "" if lap == 0 else f" {chr(ord('B') + lap - 1)}"
+    return f"{site} {role}{suffix}"
