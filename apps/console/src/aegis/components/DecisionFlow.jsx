@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Box, Chip, Collapse, Stack, Tooltip, Typography } from '@mui/material';
 import { buildDecisionFlow, shortHash } from 'aegis/decisionFlow';
-import { formatRuleName } from 'aegis/format';
+import { formatDateTime, formatRuleName } from 'aegis/format';
 import IconifyIcon from 'components/base/IconifyIcon';
 import Mono from './Mono';
 
@@ -412,6 +412,124 @@ const Terminus = ({ label, tone = 'neutral', top = false }) => (
 
 const VERDICT_TONE = { ALLOW: 'success', DENY: 'error', STEP_UP: 'warning' };
 
+const STEP_UP_OUTCOME = {
+  pending: {
+    tone: 'warning',
+    title: 'Paused — waiting for the card member',
+    body: 'Nothing has been charged. The purchase cannot proceed until it is answered.',
+    icon: 'material-symbols:pause-circle-rounded',
+  },
+  approved: {
+    tone: 'success',
+    title: 'Approved by the card member',
+    body: 'The hold was released and the purchase proceeded.',
+    icon: 'material-symbols:how-to-reg-rounded',
+  },
+  always_allowed: {
+    tone: 'success',
+    title: 'Approved — and allowed from now on',
+    body: 'The hold was released and this kind of purchase will not be held again.',
+    icon: 'material-symbols:how-to-reg-rounded',
+  },
+  declined: {
+    tone: 'error',
+    title: 'Declined by the card member',
+    body: 'The hold was never released. Nothing was charged.',
+    icon: 'material-symbols:person-cancel-rounded',
+  },
+  expired: {
+    tone: 'neutral',
+    title: 'Expired without an answer',
+    body: 'Nobody answered in time, so the purchase did not proceed.',
+    icon: 'material-symbols:hourglass-disabled-rounded',
+  },
+};
+
+/**
+ * The human step.
+ *
+ * A STEP_UP is a PAUSE, not an ending: the engine stopped, a person answered,
+ * and the purchase then proceeded or did not. Drawn as a distinct node on the
+ * same rail -- square, not round, because it is the one step no rule decided --
+ * so the whole arc reads as one story: stopped here, answered by a human,
+ * proceeded.
+ */
+const HumanStep = ({ stepUp }) => {
+  const outcome = STEP_UP_OUTCOME[stepUp.state] ?? STEP_UP_OUTCOME.pending;
+  const neutral = outcome.tone === 'neutral';
+
+  return (
+    <Box>
+      <Rail height={18} />
+      <Stack direction="row" spacing={1.5} alignItems="flex-start">
+        <Box
+          sx={(theme) => ({
+            width: NODE,
+            height: NODE,
+            flexShrink: 0,
+            // Square: this step was taken by a person, not by a rule.
+            borderRadius: 1,
+            display: 'grid',
+            placeItems: 'center',
+            backgroundColor: neutral
+              ? theme.vars.palette.background.elevation3
+              : theme.vars.palette[outcome.tone].main,
+            boxShadow: neutral
+              ? 'none'
+              : `0 0 0 4px rgba(${theme.vars.palette[outcome.tone].mainChannel} / 0.18)`,
+          })}
+        >
+          <IconifyIcon
+            icon={outcome.icon}
+            sx={(theme) => ({
+              fontSize: 15,
+              color: neutral
+                ? theme.vars.palette.text.secondary
+                : theme.vars.palette[outcome.tone].contrastText,
+            })}
+          />
+        </Box>
+        <Box
+          sx={(theme) => ({
+            flex: 1,
+            minWidth: 0,
+            px: 1.5,
+            py: 1,
+            borderRadius: 1.5,
+            border: '1px solid',
+            borderColor: neutral
+              ? theme.vars.palette.divider
+              : `rgba(${theme.vars.palette[outcome.tone].mainChannel} / 0.5)`,
+            backgroundColor: neutral
+              ? theme.vars.palette.background.elevation1
+              : `rgba(${theme.vars.palette[outcome.tone].mainChannel} / 0.09)`,
+          })}
+        >
+          <Stack direction="row" spacing={1} alignItems="baseline" sx={{ flexWrap: 'wrap' }}>
+            <Typography variant="body2" sx={{ fontWeight: 700 }}>
+              {outcome.title}
+            </Typography>
+            <Chip
+              size="small"
+              label="human decision"
+              variant="outlined"
+              sx={{ height: 17, fontSize: 10 }}
+            />
+          </Stack>
+          <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
+            {outcome.body}
+          </Typography>
+          {stepUp.resolvedAt && (
+            <Mono variant="monoCaption" sx={{ display: 'block', mt: 0.5, color: 'text.disabled' }}>
+              {formatDateTime(stepUp.resolvedAt)}
+            </Mono>
+          )}
+        </Box>
+      </Stack>
+    </Box>
+  );
+};
+
 const DecisionFlow = ({ decision, expanded = false }) => {
   const flow = buildDecisionFlow(decision);
   if (!flow) return null;
@@ -500,7 +618,9 @@ const DecisionFlow = ({ decision, expanded = false }) => {
           />
         ))}
 
+        {/* The engine's verdict, then -- if it paused -- what the human did. */}
         <Terminus label={flow.verdict} tone={tone} />
+        {flow.stepUp && <HumanStep stepUp={flow.stepUp} />}
       </Box>
 
       {/* ---- the score ---------------------------------------------- */}

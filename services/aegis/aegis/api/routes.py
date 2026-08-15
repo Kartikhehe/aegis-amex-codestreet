@@ -345,6 +345,19 @@ def resolve_step_up(
     row.step_up_state = state
     row.step_up_resolved_at = utcnow()
     db.commit()
+    db.refresh(row)
+
+    # Keep the live mirror in step with SQL.
+    #
+    # The mirror was written on /decide and never here, so Firestore kept
+    # step_up_state "pending" forever. The console reads the mirror first and
+    # REST second, so a reload showed "approved", flicked back to "needs
+    # approval" when the stale mirror arrived, then corrected itself -- which
+    # looks exactly like a system that cannot make up its mind.
+    #
+    # Best-effort, as everywhere else: a mirror that is down must never fail an
+    # approval the card member has already given. SQL is the record.
+    get_mirror().mirror_decision(row)
 
     return s.StepUpResolveResponse(
         action_id=action_id, step_up_state=state, verdict=row.verdict, message=message
@@ -1174,8 +1187,8 @@ def overview(db: DbSession, principal: CurrentUser, hours: int = Query(24, ge=1,
     return s.OverviewResponse(
         tiles=[
             s.MetricTile(
-                key="Payment Requests",
-                label="Decisions",
+                key="decisions",
+                label="Payment Requests",
                 value=float(total),
                 tooltip=f"Authorisation decisions made in the last {hours} hours.",
             ),
@@ -1193,7 +1206,7 @@ def overview(db: DbSession, principal: CurrentUser, hours: int = Query(24, ge=1,
             ),
             s.MetricTile(
                 key="exposure",
-                label="Approved exposure",
+                label="Approved Spend",
                 value=float(exposure),
                 unit="INR",
                 tooltip="Total value of transactions allowed in the window.",
@@ -1349,6 +1362,7 @@ def _decision_out(row: DecisionRow, agent: Optional[AgentRow]) -> s.DecisionOut:
         rules_fired=[s.RuleOutcomeOut(**r) for r in (row.rules_fired or [])],
         features=row.features or {},
         step_up_state=row.step_up_state,
+        step_up_resolved_at=row.step_up_resolved_at,
         block_report=row.block_report,
         block_report_confirmed=row.block_report_confirmed,
         latency_ms=row.latency_ms or 0,
@@ -1430,6 +1444,49 @@ def _fleet_out(state) -> s.FleetStateOut:
 # convincing is precisely that nothing here can produce a verdict the real
 # integration path would not produce.
 # --------------------------------------------------------------------------
+
+
+# How long two identical baskets are treated as one intent. Long enough to
+# absorb a double-click, a retried request or an impatient reload; short enough
+# that genuinely buying the same thing again in the same session still gets its
+# own decision.
+_SIM_IDEMPOTENCY_WINDOW_SECONDS = 90
+
+
+def _derived_idempotency_key(
+    agent_id: str,
+    merchant_id: str,
+    amount: Decimal,
+    ship_to: Optional[str],
+    items: list[dict],
+) -> str:
+    """A stable key for one purchase intent, from what was actually asked for.
+
+    The window is quantised rather than rolling: two requests land on the same
+    key when they fall in the same bucket. That is deliberately simple -- an
+    exact rolling window would need per-key state, and the failure mode here
+    (one extra decision at a bucket boundary) is the one we can live with,
+    where the failure mode of no key at all is a double approval.
+    """
+    from ..engine.types import canonical_json, sha256_hex
+
+    basket = sorted(
+        (str(i.get("label", "")), int(i.get("quantity", 1)), str(i.get("unit_amount", "0")))
+        for i in items
+    )
+    bucket = int(utcnow().timestamp()) // _SIM_IDEMPOTENCY_WINDOW_SECONDS
+    return sha256_hex(
+        canonical_json(
+            {
+                "agent": agent_id,
+                "merchant": merchant_id,
+                "amount": str(amount),
+                "ship_to": ship_to or "",
+                "basket": basket,
+                "bucket": bucket,
+            }
+        )
+    )[:32]
 
 
 @router.get("/storefronts", response_model=list[dict], tags=["simulator"])
@@ -1527,7 +1584,21 @@ def simulate_checkout(
         ],
         ship_to=ship_to,
         injected_instruction=parsed.injected_instruction,
-        idempotency_key=payload.idempotency_key,
+        # An idempotency key is DERIVED when the caller does not supply one.
+        #
+        # Without this, pressing send twice -- or a slow page being retried --
+        # produced two decisions, two ledger records and two approval prompts
+        # for a single intent, and the card member had to answer the same
+        # purchase twice. The engine already guards against exactly this; the
+        # guard was simply never engaged because the key was always null.
+        #
+        # Keyed on what was actually asked for (agent, shop, basket, amount,
+        # destination) inside a short window, so a genuine second purchase of
+        # the same thing later still gets its own decision. An explicit key
+        # from the caller always wins.
+        idempotency_key=payload.idempotency_key or _derived_idempotency_key(
+            payload.agent_id, shop.merchant_id, amount, ship_to, parsed.items
+        ),
     )
 
     # The real path. Not a copy of it.
@@ -1597,6 +1668,7 @@ def report_block(
     row.block_report_confirmed = None
     db.commit()
     db.refresh(row)
+    get_mirror().mirror_decision(row)
 
     return s.BlockReportResponse(
         action_id=action_id,
@@ -1641,6 +1713,7 @@ def confirm_block_report(
     row.block_report_confirmed = payload.confirmed
     db.commit()
     db.refresh(row)
+    get_mirror().mirror_decision(row)
 
     return s.BlockReportResponse(
         action_id=action_id,

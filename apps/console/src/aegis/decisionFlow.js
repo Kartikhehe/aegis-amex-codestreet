@@ -261,6 +261,19 @@ export const buildDecisionFlow = (decision) => {
     conformance: decision.conformance ?? null,
     injected: redactInjection(decision.injected_instruction),
     ledger,
+    // What the card member did after the engine paused.
+    //
+    // A STEP_UP is not the end of the story: the purchase stopped, a human
+    // answered, and it then completed or did not. Without this the flow ends
+    // at "held for approval" and gives no sign that anything happened next --
+    // which is the single most important part of the step-up story to show.
+    stepUp:
+      decision.verdict === 'STEP_UP'
+        ? {
+            state: decision.step_up_state ?? 'pending',
+            resolvedAt: decision.step_up_resolved_at ?? null,
+          }
+        : null,
     verdict: decision.verdict,
     reasonCode: decision.reason_code,
     reason: decision.human_readable_reason,

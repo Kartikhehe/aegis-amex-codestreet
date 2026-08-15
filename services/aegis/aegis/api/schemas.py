@@ -168,6 +168,7 @@ class DecisionOut(ApiModel):
     rules_fired: list[RuleOutcomeOut] = Field(default_factory=list)
     features: dict[str, Any] = Field(default_factory=dict)
     step_up_state: Optional[str] = None
+    step_up_resolved_at: Optional[datetime] = None
 
     # A later judgement ABOUT this decision, never part of it. The verdict is
     # immutable and hashed; these say what people concluded afterwards.
