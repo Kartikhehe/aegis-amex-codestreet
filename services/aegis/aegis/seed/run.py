@@ -174,6 +174,37 @@ def _seed_users(session: Session) -> list[dict[str, str]]:
             "operator_id": None,
             "card_member_id": "cm_anita",
         },
+        # The corporate card holders.
+        #
+        # Without these, 178 of 240 agents belonged to a card_member_id with no
+        # user behind it, so every step-up they raised went to a queue nobody
+        # could open. The console showed "needs approval" forever and the
+        # member app -- correctly scoped to one card -- showed nothing, which
+        # reads as a broken sync when it is really an unreachable approver.
+        {
+            "email": "travel@aegis.test",
+            "name": "Voyagr Travel Card",
+            "role": "card_member",
+            "password": "password123",
+            "operator_id": None,
+            "card_member_id": "cm_voyagr",
+        },
+        {
+            "email": "fleet@aegis.test",
+            "name": "LogiPath Fleet Card",
+            "role": "card_member",
+            "password": "password123",
+            "operator_id": None,
+            "card_member_id": "cm_logipath",
+        },
+        {
+            "email": "procurement@aegis.test",
+            "name": "NorthStar Procurement Card",
+            "role": "card_member",
+            "password": "password123",
+            "operator_id": None,
+            "card_member_id": "cm_northstar",
+        },
     ]
     for account in accounts:
         session.add(

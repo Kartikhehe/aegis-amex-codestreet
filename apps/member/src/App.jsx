@@ -114,6 +114,40 @@ const Login = ({ onSignedIn }) => {
         <Button type="submit" size="large" variant="contained" disabled={busy}>
           {busy ? "Signing in…" : "Sign in"}
         </Button>
+
+        {/* Four cards, four holders. Agents belong to ONE of them, so a
+            corporate agent's approvals never appear on the household card --
+            which looks like a broken sync until you know which card to open. */}
+        <Stack spacing={0.75} sx={{ pt: 1 }}>
+          <Typography variant="caption" sx={{ color: "text.disabled" }}>
+            Demo cards — password123
+          </Typography>
+          {[
+            ["member@aegis.test", "Anita Desai · household"],
+            ["travel@aegis.test", "Voyagr · business travel"],
+            ["fleet@aegis.test", "LogiPath · fleet fuel"],
+            ["procurement@aegis.test", "NorthStar · procurement"],
+          ].map(([address, label]) => (
+            <Stack
+              key={address}
+              direction="row"
+              spacing={1}
+              alignItems="baseline"
+              onClick={() => setEmail(address)}
+              sx={{ cursor: "pointer", "&:hover": { opacity: 0.75 } }}
+            >
+              <Typography
+                variant="caption"
+                sx={{ fontFamily: '"JetBrains Mono", monospace', color: "primary.main" }}
+              >
+                {address}
+              </Typography>
+              <Typography variant="caption" sx={{ color: "text.disabled" }}>
+                {label}
+              </Typography>
+            </Stack>
+          ))}
+        </Stack>
       </Stack>
     </Container>
   );

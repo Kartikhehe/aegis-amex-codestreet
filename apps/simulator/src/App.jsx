@@ -333,7 +333,10 @@ const App = () => {
                 id: `${response.action_id}-verdict`,
                 role: 'system',
                 verdict: response.decision.verdict,
-                text: response.decision.human_readable_reason,
+                text:
+                  response.decision.verdict === 'STEP_UP' && assistant.approver?.email
+                    ? `${response.decision.human_readable_reason}\n\nWaiting on ${assistant.approver.name} (${assistant.approver.email}) in the card member app.`
+                    : response.decision.human_readable_reason,
                 meta: {
                   rule: response.decision.reason_code,
                   actionId: response.action_id,

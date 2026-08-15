@@ -18,7 +18,7 @@ const money = (value) =>
 const BasketPanel = ({ assistant, basket = [], total = 0, lastVerdict }) => {
   if (!assistant) return null;
 
-  const { agent, shop } = assistant;
+  const { agent, shop, approver } = assistant;
   const ceiling = Number(agent.per_transaction_ceiling ?? 0);
   const used = ceiling > 0 ? Math.min((total / ceiling) * 100, 100) : 0;
   const overCeiling = ceiling > 0 && total > ceiling;
@@ -151,6 +151,26 @@ const BasketPanel = ({ assistant, basket = [], total = 0, lastVerdict }) => {
           )}
         </Stack>
       </Box>
+
+      <Divider />
+
+      {/* Who answers if this is held.
+          Corporate agents sit on a different card from household ones, so a
+          step-up here goes to THAT card holder. Saying so stops someone
+          hunting for an approval in an app scoped to another card. */}
+      {approver?.email && (
+        <Box>
+          <Typography variant="overline" sx={{ color: 'text.disabled', fontWeight: 700 }}>
+            Approvals go to
+          </Typography>
+          <Typography variant="body2" sx={{ mt: 0.5 }}>
+            {approver.name}
+          </Typography>
+          <Mono size="0.72rem" sx={{ color: 'text.disabled' }}>
+            {approver.email}
+          </Mono>
+        </Box>
+      )}
 
       <Divider />
 

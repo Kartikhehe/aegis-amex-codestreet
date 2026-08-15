@@ -47,6 +47,7 @@ from ..db.models import (
     MerchantRow,
     Operator,
     PolicyVersion,
+    User,
 )
 from ..engine.attribution import attribution_from_decision
 from ..engine.delegation import build_chain, can_issue, descendants_of
@@ -1173,7 +1174,7 @@ def overview(db: DbSession, principal: CurrentUser, hours: int = Query(24, ge=1,
     return s.OverviewResponse(
         tiles=[
             s.MetricTile(
-                key="decisions",
+                key="Payment Requests",
                 label="Decisions",
                 value=float(total),
                 tooltip=f"Authorisation decisions made in the last {hours} hours.",
@@ -1679,6 +1680,13 @@ def list_assistants(db: DbSession, principal: CurrentUser) -> list[dict]:
         key = stem.rsplit("_", 1)[0]
         by_class.setdefault(key, []).append(row)
 
+    # card_member_id -> the user who can actually answer for that card.
+    card_member_logins = {
+        u.card_member_id: u
+        for u in db.scalars(select(User).where(User.role == "card_member"))
+        if u.card_member_id
+    }
+
     visible = principal.role != Role.OPERATOR
     assistants: list[dict] = []
     for shop in storefronts():
@@ -1694,12 +1702,24 @@ def list_assistants(db: DbSession, principal: CurrentUser) -> list[dict]:
             continue
 
         chosen = candidates[0]
+
+        # Who answers a step-up raised here. Corporate agents sit on a
+        # different card from the household ones, so a held purchase goes to
+        # THAT card holder -- not whoever is driving the simulator. Returning
+        # it lets the surface say so, instead of leaving someone hunting for an
+        # approval in an app scoped to a card they are not signed in as.
+        approver = card_member_logins.get(chosen.card_member_id)
         assistants.append(
             {
                 "shop": shop,
                 "greeting": SHOP_GREETINGS.get(
                     merchant_id, f"Welcome to {shop['name']}. What do you need?"
                 ),
+                "approver": {
+                    "card_member_id": chosen.card_member_id,
+                    "name": approver.name if approver else None,
+                    "email": approver.email if approver else None,
+                },
                 "agent": {
                     "agent_id": chosen.agent_id,
                     "name": chosen.name,
