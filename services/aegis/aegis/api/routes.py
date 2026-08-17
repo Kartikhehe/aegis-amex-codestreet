@@ -1836,3 +1836,43 @@ def list_assistants(db: DbSession, principal: CurrentUser) -> list[dict]:
             }
         )
     return assistants
+
+
+@router.get("/pipeline", response_model=dict, tags=["policy"])
+def pipeline(db: DbSession, principal: CurrentUser) -> dict:
+    """The decision pipeline, described by the code that runs it.
+
+    Built from the engine's own RULE_ORDER and the live ruleset rather than a
+    hand-written list, so the published description cannot drift from actual
+    behaviour: add a rule and it appears here, remove one and it disappears. A
+    governance product whose documentation disagreed with its engine would be
+    self-refuting.
+    """
+    from ..engine.compliance import categories_summary
+    from ..engine.diligence import DEFAULT_PRICE_TOLERANCE, UNAVAILABLE_CHECKS
+    from ..engine.policy import RULE_ORDER, SCORING_RULES
+
+    rs = active_ruleset(db)
+    t = rs.thresholds
+    return {
+        "ruleset_hash": rs.ruleset_hash,
+        "rule_order": list(RULE_ORDER),
+        "scoring_rules": sorted(SCORING_RULES),
+        "thresholds": {
+            "conformance_deny_floor": float(t.conformance_deny_floor),
+            "conformance_review_floor": float(t.conformance_review_floor),
+            "conformance_marginal_floor": float(t.conformance_marginal_floor),
+        },
+        # Published deliberately: a control that only works while nobody knows
+        # what it checks is obscurity, not governance. The term lists stay
+        # server-side.
+        "prohibited_goods_categories": categories_summary(),
+        # The diligence components we have DESIGNED but cannot run, each with
+        # the specific obstacle. Stated by us rather than discovered by someone
+        # else.
+        "diligence_unavailable": [
+            {"key": c.key, "label": c.label, "detail": c.detail, "basis": c.basis}
+            for c in UNAVAILABLE_CHECKS
+        ],
+        "diligence_price_tolerance": str(DEFAULT_PRICE_TOLERANCE),
+    }

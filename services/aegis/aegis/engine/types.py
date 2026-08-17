@@ -114,6 +114,11 @@ class ReasonCode(str, Enum):
     MANDATE_EXPIRED = "mandate_expired"
     DELEGATION_DEPTH_EXCEEDED = "delegation_depth_exceeded"
 
+    # Legality. Ranked ABOVE the mandate: a card member cannot authorise a
+    # purchase that is unlawful or network-prohibited, so no mandate, ceiling
+    # or approval can clear one.
+    PROHIBITED_GOODS = "prohibited_goods"
+
     # Mandate conformance
     PROHIBITED_ATTRIBUTE_VETO = "prohibited_attribute_veto"
     SHIP_TO_MISMATCH = "ship_to_mismatch"
@@ -126,6 +131,11 @@ class ReasonCode(str, Enum):
     AMOUNT_ABOVE_CEILING = "amount_above_ceiling"
     VELOCITY_LIMIT = "velocity_limit"
     NOVEL_MERCHANT = "novel_merchant"
+
+    # Diligence -- was this a COMPETENT purchase, not merely an authorised one.
+    # Advisory by design: it never denies on judgement, it flags or asks.
+    DILIGENCE_FLAG = "diligence_flag"
+    DILIGENCE_BELOW_BAR = "diligence_below_bar"
 
     # Degraded operation
     SCORER_UNAVAILABLE_FAIL_CLOSED = "scorer_unavailable_fail_closed"
@@ -301,10 +311,17 @@ class CartItem:
     quantity: int = 1
     unit_amount: Decimal = Decimal("0")
 
+    # Merchant-supplied reference price, mirroring ACP's `list_price` on a line
+    # item. Optional because AP2 carries no such field and many merchants will
+    # not send one. Asserted by the merchant, so it is a diligence SIGNAL and
+    # never an independent benchmark -- the UI says so wherever it is used.
+    list_price: Optional[Decimal] = None
+
     def to_canonical(self) -> dict[str, Any]:
         return {
             "label": self.label,
             "attributes": sorted(self.attributes),
+            "list_price": self.list_price,
             "quantity": self.quantity,
             "unit_amount": self.unit_amount,
         }

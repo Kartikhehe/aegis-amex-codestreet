@@ -65,6 +65,19 @@ infra             docker-compose: postgres:16, redis:7, the service
 
 ---
 
+## Documentation
+
+| Document | What it covers |
+|---|---|
+| [`docs/PIPELINE.md`](docs/PIPELINE.md) | **Every check in the decision pipeline**: the question it asks, the real-world mechanism it stands in for, the exact data AEGIS reads, and what is honestly not implemented. Includes the hard-coded-vs-live inventory and the answers to what a judge is most likely to probe. |
+| [`DISTRIBUTION.md`](DISTRIBUTION.md) | How the 25,000-action seed corpus is generated |
+| [`FIREBASE.md`](FIREBASE.md) | Firestore mirror setup |
+
+`GET /api/pipeline` serves the same structure from the engine's own RULE_ORDER,
+so the documentation cannot drift from what the code does.
+
+---
+
 ## The engine
 
 Seven modules under `services/aegis/aegis/engine/`, all pure functions of their

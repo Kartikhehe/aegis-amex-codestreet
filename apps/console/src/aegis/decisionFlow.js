@@ -19,35 +19,134 @@ import { formatCurrency, formatScore } from 'aegis/format';
 
 // What each rule is actually asking, in the language of the person reading it.
 // Without this the flow is a list of identifiers, which explains nothing.
-const RULE_QUESTIONS = {
-  fleet_stop: 'Is the whole fleet halted by an operator?',
-  agent_breaker: 'Has this agent tripped a circuit breaker?',
-  operator_revoked: 'Is the operator still allowed to act?',
-  agent_inactive: 'Is this agent active, not paused or revoked?',
-  mandate_expired: 'Is the authority still in date?',
-  delegation_depth: 'Was authority passed down further than permitted?',
-  suspected_injection: 'Was the agent fed text trying to override its limits?',
-  ship_to_mismatch: 'Are the goods going where the card member authorised?',
-  prohibited_attribute_veto: 'Does the basket contain something never permitted?',
-  conformance_deny_floor: 'Does this match the stated purpose at all?',
-  conformance_review_floor: 'Does it match the purpose clearly enough to pass unseen?',
-  amount_above_ceiling: 'Is it within the per-purchase and daily limits?',
-  velocity_limit: 'Has this agent bought too many times today?',
-  novel_merchant: 'Has this agent used this merchant before?',
-  conformance_marginal: 'A weaker-than-usual match: allow, but flag it.',
-  allow: 'Everything checked out.',
+/**
+ * What each rule asks, and where its answer comes from.
+ *
+ * `question` is the check in the reader's language -- a flow of identifiers
+ * explains nothing. `source` says what the answer was computed FROM, because
+ * the question a judge asks is "how do you actually know that?".
+ */
+const RULE_INFO = {
+  // ---- 1. Identity: is this agent real, live, and acting for someone? ----
+  fleet_stop: {
+    question: 'Is the whole fleet halted by an operator?',
+    source: 'fleet_state row, read on every decision',
+  },
+  agent_breaker: {
+    question: 'Has this agent tripped a circuit breaker?',
+    source: 'breaker_tripped on the agent, set by the breaker sweep',
+  },
+  operator_revoked: {
+    question: 'Is the operator still allowed to act?',
+    source: 'revoked flag on the operator record',
+  },
+  agent_inactive: {
+    question: 'Is this agent active, not paused or revoked?',
+    source: 'status on the agent record',
+  },
+  mandate_expired: {
+    question: 'Is the authority still in date?',
+    source: 'expires_at on the signed mandate, against decision time',
+  },
+  delegation_depth: {
+    question: 'Was authority passed down further than permitted?',
+    source: 'delegation chain walked to the root mandate',
+  },
+
+  // ---- 2. Authority: was it authorised to buy THIS, here, delivered there?
+  suspected_injection: {
+    question: 'Was the agent fed text trying to override its limits?',
+    source: 'deterministic phrase match on the untrusted text, pre-model',
+  },
+  ship_to_mismatch: {
+    question: 'Are the goods going where the card member authorised?',
+    source: "ship_to on the request against the mandate's address",
+  },
+
+  // ---- 3. Compliance: may this be sold on a card at all? ----------------
+  prohibited_goods: {
+    question: 'Is this lawful to buy on a card at all?',
+    source: 'deterministic screen of the basket against prohibited categories',
+  },
+  prohibited_attribute_veto: {
+    question: 'Does the basket contain something the member never permits?',
+    source: 'cart + merchant attributes against the mandate prohibitions',
+  },
+
+  // ---- 4. Conformance: does it match the purpose? (the only model) ------
+  conformance_deny_floor: {
+    question: 'Does this match the stated purpose at all?',
+    source: 'conformance score against the deny floor',
+  },
+  conformance_review_floor: {
+    question: 'Does it match clearly enough to pass unseen?',
+    source: 'conformance score against the review floor',
+  },
+
+  // ---- 5. Limits: ceilings, velocity, familiarity -----------------------
+  amount_above_ceiling: {
+    question: 'Is it within the per-purchase and daily limits?',
+    source: "live SUM of today's allowed spend for this agent",
+  },
+  velocity_limit: {
+    question: 'Has this agent bought too many times today?',
+    source: "live COUNT of today's allowed decisions for this agent",
+  },
+  novel_merchant: {
+    question: 'Has this agent used this merchant before?',
+    source: "DISTINCT merchants from this agent's own decision history",
+  },
+
+  // ---- 6. Diligence: was this a COMPETENT purchase? --------------------
+  diligence_below_bar: {
+    question: 'Was this a careful purchase, not merely an authorised one?',
+    source: 'request text vs basket, and paid vs merchant-asserted list price',
+  },
+
+  // ---- 7. Outcome ------------------------------------------------------
+  conformance_marginal: {
+    question: 'A weaker-than-usual match: allow, but flag it.',
+    source: 'conformance score against the marginal floor',
+  },
+  allow: {
+    question: 'Everything checked out.',
+    source: 'no earlier rule matched',
+  },
 };
+
+// Kept for callers that only want the question.
+const RULE_QUESTIONS = Object.fromEntries(
+  Object.entries(RULE_INFO).map(([key, info]) => [key, info.question]),
+);
 
 // Rules whose job is to stop bad things. A match on one of those is a BLOCK
 // and the tile reads as one. `allow` is the opposite: matching it IS the pass,
 // so it must never be drawn in the red "stopped here" treatment.
-const CLEARANCE_RULES = new Set(['allow', 'conformance_marginal']);
+const CLEARANCE_RULES = new Set(['allow', 'conformance_marginal', 'diligence_below_bar']);
 
+/**
+ * The pipeline, as seven ordered stages.
+ *
+ * The order is the ENGINE's order -- this view cannot reorder the pipeline, it
+ * can only name it. Two orderings are load-bearing and worth stating:
+ *
+ *   Compliance sits ABOVE the mandate. A member can permit gift cards; nobody
+ *   can permit a controlled substance, so legality must not be reachable by a
+ *   permissive mandate.
+ *
+ *   Every hard veto sits BEFORE the model. Injection, destination, legality and
+ *   prohibited attributes are all decided deterministically, so no score can
+ *   overturn them and no prompt can argue its way past them.
+ *
+ * `plane` maps each stage to the architecture in the project doc, so the demo
+ * and the design describe the same system.
+ */
 const STAGES = [
   {
-    key: 'authority',
-    title: 'Authority',
-    caption: 'Is this agent allowed to act at all?',
+    key: 'identity',
+    title: 'Identity',
+    plane: 'Identity plane',
+    caption: 'Is this agent real, live, and acting for someone?',
     rules: [
       'fleet_stop',
       'agent_breaker',
@@ -58,41 +157,49 @@ const STAGES = [
     ],
   },
   {
-    key: 'integrity',
-    title: 'Integrity',
-    caption: 'Deterministic vetoes, applied before any model sees this',
-    rules: ['suspected_injection', 'ship_to_mismatch', 'prohibited_attribute_veto'],
+    key: 'authority',
+    title: 'Authority',
+    plane: 'Authority plane',
+    caption: 'Was it authorised to buy this, and to send it there?',
+    rules: ['suspected_injection', 'ship_to_mismatch'],
+  },
+  {
+    key: 'compliance',
+    title: 'Compliance',
+    plane: 'Decision plane · hard vetoes',
+    caption: 'May this be sold on a card at all? Ranked above the mandate.',
+    rules: ['prohibited_goods', 'prohibited_attribute_veto'],
   },
   {
     key: 'conformance',
     title: 'Conformance',
+    plane: 'Decision plane · the only model in the path',
     caption: 'Does the purchase match the purpose it was authorised for?',
     rules: ['conformance_deny_floor', 'conformance_review_floor'],
   },
   {
     key: 'limits',
     title: 'Limits',
+    plane: 'Control plane',
     caption: 'Ceilings, velocity and merchant familiarity',
     rules: ['amount_above_ceiling', 'velocity_limit', 'novel_merchant'],
   },
   {
+    key: 'diligence',
+    title: 'Diligence',
+    plane: 'Decision plane · advisory',
+    caption: 'Was this a competent purchase? Flags or asks — never denies.',
+    rules: ['diligence_below_bar'],
+  },
+  {
     key: 'outcome',
     title: 'Outcome',
+    plane: 'Evidence plane',
     caption: 'Nothing stopped it — allowed, flagged if the match was weak',
     rules: ['conformance_marginal', 'allow'],
   },
 ];
 
-/**
- * Every rule the engine can evaluate, in order.
- *
- * Mirrors RULE_ORDER in the engine. The stage map above MUST cover it exactly:
- * a rule missing from both is invisible in this view, and a rule named here
- * that the engine does not have would be drawn as "not reached" forever. An
- * earlier version invented `daily_ceiling` and `within_mandate`, and both
- * showed up as permanently-unrun steps on decisions that had in fact run
- * every check.
- */
 const ENGINE_RULES = STAGES.flatMap((stage) => stage.rules);
 
 /**
@@ -167,6 +274,7 @@ export const buildDecisionFlow = (decision) => {
         return {
           name,
           question: RULE_QUESTIONS[name] ?? '',
+          source: RULE_INFO[name]?.source ?? '',
           detail: '',
           status: 'not_reached',
           decisive: false,
@@ -177,6 +285,7 @@ export const buildDecisionFlow = (decision) => {
       return {
         name,
         question: RULE_QUESTIONS[name] ?? '',
+        source: RULE_INFO[name]?.source ?? '',
         detail: rule.detail || '',
         status: asStatus(rule, stoppedAt, rule.index),
         // A matched clearance rule is a pass, not a block.

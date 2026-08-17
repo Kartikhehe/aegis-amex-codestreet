@@ -174,6 +174,17 @@ const Step = ({ step, last, onDrill }) => {
               {step.question}
             </Typography>
           )}
+          {/* Where the answer came from. The question a judge asks about any
+              governance check is "how do you actually know that?", so the
+              provenance sits beside the check rather than in a appendix. */}
+          {step.source && step.decisive && (
+            <Typography
+              variant="caption"
+              sx={{ color: 'text.disabled', display: 'block', mt: 0.25 }}
+            >
+              from {step.source}
+            </Typography>
+          )}
           {step.detail && (
             <Mono
               variant="monoCaption"
@@ -249,6 +260,11 @@ const Stage = ({ stage, index, expandedAll, isLast, onDrill }) => {
           <Typography variant="caption" sx={{ color: 'text.secondary' }}>
             {stage.caption}
           </Typography>
+          {stage.plane && (
+            <Typography variant="caption" sx={{ color: 'text.disabled', fontStyle: 'italic' }}>
+              {stage.plane}
+            </Typography>
+          )}
         </Stack>
       </Stack>
 

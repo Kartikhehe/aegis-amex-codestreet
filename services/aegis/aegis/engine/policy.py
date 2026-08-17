@@ -39,6 +39,8 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Callable, Optional
 
+from .compliance import screen as compliance_screen
+from .diligence import assess as assess_diligence
 from .conformance import detect_injection, ship_to_mismatch
 from .types import (
     ActionRequest,
@@ -87,6 +89,7 @@ RULE_ORDER: tuple[str, ...] = (
     "delegation_depth",
     "suspected_injection",
     "ship_to_mismatch",
+    "prohibited_goods",
     "prohibited_attribute_veto",
     "conformance_deny_floor",
     "conformance_review_floor",
@@ -94,6 +97,7 @@ RULE_ORDER: tuple[str, ...] = (
     "velocity_limit",
     "novel_merchant",
     "conformance_marginal",
+    "diligence_below_bar",
     "allow",
 )
 
@@ -418,6 +422,20 @@ def evaluate(
         )
     miss("ship_to_mismatch")
 
+    # -- 6d. prohibited goods (legality, deterministic, pre-model) ----------
+    # Ranked above the mandate on purpose. A card member can permit gift cards;
+    # nobody can permit a controlled substance, so no mandate, ceiling or
+    # member approval may clear this.
+    compliance_hit = compliance_screen(action)
+    if compliance_hit is not None:
+        return win(
+            "prohibited_goods",
+            Verdict.DENY,
+            ReasonCode.PROHIBITED_GOODS,
+            compliance_hit.detail,
+        )
+    miss("prohibited_goods")
+
     # -- 7. prohibited attribute veto (deterministic, pre-model) -------------
     # Union the prohibitions down the whole chain: a parent's "never" can never
     # be undone by a child, even if the child mandate omits it. Checked against
@@ -533,7 +551,37 @@ def evaluate(
         )
     miss("conformance_marginal")
 
-    # -- 14. allow -----------------------------------------------------------
+    # -- 14. diligence: was this a COMPETENT purchase? -----------------------
+    #
+    # Last, and deliberately so. Diligence is about quality of judgement, not
+    # authority, so it must never pre-empt a rule about whether the agent was
+    # allowed to act at all. It also never DENIES: the card member set a bar,
+    # and falling below a bar someone chose is a reason to tell them or ask
+    # them, not a reason for AEGIS to substitute its own taste for theirs.
+    #
+    # `require_diligence` on the mandate decides which: absent, a shortfall is
+    # allowed-and-flagged; set, it becomes a step-up the member answers.
+    diligence = assess_diligence(action, mandate)
+    if diligence.below_bar:
+        detail = ", ".join(diligence.flags)
+        if getattr(mandate, "require_diligence", False):
+            return win(
+                "diligence_below_bar",
+                Verdict.STEP_UP,
+                ReasonCode.DILIGENCE_BELOW_BAR,
+                detail,
+                flagged=True,
+            )
+        return win(
+            "diligence_below_bar",
+            Verdict.ALLOW,
+            ReasonCode.DILIGENCE_FLAG,
+            detail,
+            flagged=True,
+        )
+    miss("diligence_below_bar")
+
+    # -- 15. allow -----------------------------------------------------------
     return win("allow", Verdict.ALLOW, ReasonCode.WITHIN_MANDATE, "Within mandate")
 
 
