@@ -151,6 +151,17 @@ class DecisionRow(Base):
     seed_kind: Mapped[str | None] = mapped_column(String(32), index=True)
     seed_legitimate: Mapped[bool | None] = mapped_column(Boolean, index=True)
 
+    # WHICH CORPUS this row belongs to. 'main' is calibrated to the published
+    # violation base rate (~0.4%) and is where headline metrics come from;
+    # 'adversarial' is a densely-labelled evaluation set used only to measure
+    # detection by violation type. Null for real traffic.
+    #
+    # Keeping them in one table but separable is deliberate: the ledger is one
+    # chain, and a reviewer can re-derive either metric. Averaging them together
+    # would produce a threat rate thirty times the published band, which is the
+    # exact mistake this column exists to prevent.
+    seed_corpus: Mapped[str | None] = mapped_column(String(16), index=True)
+
     # STEP_UP resolution, written when the card member responds.
     step_up_state: Mapped[str | None] = mapped_column(String(16), index=True)
     step_up_resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

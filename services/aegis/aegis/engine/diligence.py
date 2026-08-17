@@ -101,6 +101,19 @@ _STOPWORDS = frozenset(
 )
 
 
+# Concrete, checkable nouns. If the shopper names one of these and the basket
+# does not contain it, that is a substitution worth flagging -- as distinct from
+# a category request ("vehicle parts") whose basket legitimately differs.
+_SUBSTITUTABLE_NOUNS = frozenset(
+    {
+        "bag", "laptop", "monitor", "keyboard", "chair", "desk", "phone",
+        "headset", "printer", "camera", "watch", "shoes", "jacket",
+        "rice", "milk", "coffee", "tea", "bread", "eggs", "oil",
+        "flight", "hotel", "room", "ticket",
+    }
+)
+
+
 @dataclass(frozen=True)
 class DiligenceCheck:
     """One component of the diligence score."""
@@ -232,19 +245,51 @@ def _substitution_distance(action) -> DiligenceCheck:
         )
 
     matched = asked & bought
-    # A request whose words appear nowhere in the basket is the "close enough
-    # swap" this check exists to catch.
-    if not matched:
+    if matched:
+        return DiligenceCheck(
+            key="substitution_distance",
+            label="Bought what was asked for",
+            status="pass",
+            detail=f"Basket matches the request on {', '.join(sorted(matched)[:4])}.",
+            basis=basis,
+        )
+
+    # NO lexical overlap. That is NOT enough on its own to flag.
+    #
+    # "Fleet vehicle parts" legitimately yields "Filters, Drive belts", and
+    # "Prescription refill" yields "First-aid kit". The relationship is
+    # semantic, and demanding shared words flagged a quarter of an entire
+    # corpus of correct purchases -- noise that would have buried the real
+    # signal and trained every operator to ignore the flag.
+    #
+    # A bare vocabulary miss is therefore reported as UNAVAILABLE: we genuinely
+    # cannot tell from words alone. We flag only when the request named a
+    # SPECIFIC thing -- a concrete noun the basket then fails to contain --
+    # which is the substitution case this check is actually for.
+    concrete = asked & _SUBSTITUTABLE_NOUNS
+    if concrete:
         return DiligenceCheck(
             key="substitution_distance",
             label="Bought what was asked for",
             status="flag",
             detail=(
-                f"Nothing in the basket matches the request "
-                f"(“{', '.join(sorted(asked)[:4])}”)."
+                f"The request named {', '.join(sorted(concrete)[:3])}, "
+                f"which the basket does not contain."
             ),
             basis=basis,
         )
+
+    return DiligenceCheck(
+        key="substitution_distance",
+        label="Bought what was asked for",
+        status="unavailable",
+        detail=(
+            "The request and the basket share no vocabulary, but the "
+            "relationship may be legitimate (a request for “vehicle parts” "
+            "yields “filters”). Not judged from words alone."
+        ),
+        basis=basis,
+    )
 
     return DiligenceCheck(
         key="substitution_distance",

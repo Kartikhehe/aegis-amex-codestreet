@@ -584,6 +584,7 @@ class MarginalWrapper:
 
 def seed(
     total_actions: int = dist.TOTAL_ACTIONS,
+    adversarial_actions: int = dist.ADVERSARIAL_ACTIONS,
     freeze: bool = False,
     quiet: bool = False,
 ) -> dict[str, Any]:
@@ -642,27 +643,43 @@ def seed(
             logger.info("conformance scorer: %s", scorer_label)
 
         # ---- plan the actions --------------------------------------------
-        planned: list[tuple[dist.MandateClass, AgentRow, str, datetime]] = []
+        # TWO CORPORA, generated together and kept separable.
+        #
+        #   main         calibrated to the published 0.4% violation base rate.
+        #                Headline metrics -- block rate, false-block rate,
+        #                verdict mix -- come from here and nowhere else.
+        #
+        #   adversarial  densely labelled, deliberately unrealistic. At 0.4% a
+        #                25k corpus holds ~35 gift-card cases: realistic, but too
+        #                sparse to measure detection or to demonstrate. Standard
+        #                practice in fraud research is to report a base-rate
+        #                realistic corpus AND a balanced evaluation set, never
+        #                mixing them.
+        planned: list[tuple[dist.MandateClass, AgentRow, str, datetime, str]] = []
         class_weights = {c.key: c.weight for c in dist.MANDATE_CLASSES}
         classes_by_key = {c.key: c for c in dist.MANDATE_CLASSES}
 
-        for index in range(total_actions):
-            key = _pick(rng, class_weights)
-            klass = classes_by_key[key]
-            pool = agents_by_class.get(key) or agent_rows
-            agent = rng.choice(pool)
-            kind = _pick(rng, dist.ACTION_MIX)
-            planned.append((klass, agent, kind, _timestamp(rng, now)))
+        def _plan(count: int, mix: dict[str, float], corpus: str) -> None:
+            for _ in range(count):
+                key = _pick(rng, class_weights)
+                klass = classes_by_key[key]
+                pool = agents_by_class.get(key) or agent_rows
+                planned.append(
+                    (klass, rng.choice(pool), _pick(rng, mix), _timestamp(rng, now), corpus)
+                )
+
+        _plan(total_actions, dist.ACTION_MIX, "main")
+        _plan(adversarial_actions, dist.ADVERSARIAL_MIX, "adversarial")
 
         planned.sort(key=lambda p: p[3])
 
-        actions: list[tuple[ActionRequest, str]] = []
+        actions: list[tuple[ActionRequest, str, str]] = []
         marginal_ids: set[str] = set()
-        for index, (klass, agent, kind, when) in enumerate(planned):
+        for index, (klass, agent, kind, when, corpus) in enumerate(planned):
             action = _build_action(rng, klass, agent, kind, when, index)
             if kind == "in_purpose_marginal":
                 marginal_ids.add(action.action_id)
-            actions.append((action, kind))
+            actions.append((action, kind, corpus))
 
         scorer = MarginalWrapper(base_scorer, random.Random(dist.RANDOM_SEED + 2), marginal_ids)
         engine = ConformanceEngine(scorer=scorer, cache=cache)
@@ -676,10 +693,15 @@ def seed(
         member_rng = random.Random(dist.RANDOM_SEED + 3)
         step_ups_resolved = 0
 
-        for position, (action, kind) in enumerate(actions):
+        for position, (action, kind, corpus) in enumerate(actions):
             try:
                 decision, _, _ = decide(
-                    session, action, engine, now=action.requested_at, seed_kind=kind
+                    session,
+                    action,
+                    engine,
+                    now=action.requested_at,
+                    seed_kind=kind,
+                    seed_corpus=corpus,
                 )
             except LookupError:
                 continue

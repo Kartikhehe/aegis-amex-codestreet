@@ -7,6 +7,8 @@ product that overstated its own evidence would refute its own thesis.
 
 from decimal import Decimal
 
+import pytest
+
 from aegis.engine.diligence import (
     DEFAULT_PRICE_TOLERANCE,
     UNAVAILABLE_CHECKS,
@@ -155,3 +157,40 @@ class TestResultShape:
 
     def test_default_tolerance_is_a_stated_number(self):
         assert DEFAULT_PRICE_TOLERANCE == Decimal("0.25")
+
+
+class TestSubstitutionDoesNotCryWolf:
+    """A vocabulary miss is not, on its own, evidence of a bad purchase.
+
+    The first version flagged any basket sharing no words with the request. On
+    a real corpus that fired on 24% of rows -- "Fleet vehicle parts" yielding
+    "Filters, Drive belts", "Prescription refill" yielding "First-aid kit" --
+    all correct purchases. Noise at that rate buries the real signal and trains
+    every operator to ignore the flag, which is worse than not having it.
+    """
+
+    @pytest.mark.parametrize(
+        "request_text,items",
+        [
+            ("Fleet vehicle parts", ["Filters", "Drive belts"]),
+            ("Prescription refill", ["First-aid kit"]),
+            ("Monthly cloud spend", ["Compute credits"]),
+            ("Site consumables", ["Cleaning supplies"]),
+        ],
+    )
+    def test_category_requests_are_not_flagged(self, request_text, items):
+        action = _Action([_Item(i, 500) for i in items], request_text)
+        result = assess(action, _Mandate())
+        assert "substitution_distance" not in result.flags
+        assert check(result, "substitution_distance").status == "unavailable"
+
+    def test_a_named_concrete_item_missing_IS_flagged(self):
+        """This is the case the check exists for."""
+        action = _Action([_Item("Table lamp", 1800)], "buy a black bag under 2000")
+        result = assess(action, _Mandate())
+        assert "substitution_distance" in result.flags
+        assert "bag" in check(result, "substitution_distance").detail
+
+    def test_a_named_item_present_passes(self):
+        action = _Action([_Item("Black trolley bag", 1800)], "buy a black bag")
+        assert check(assess(action, _Mandate()), "substitution_distance").status == "pass"

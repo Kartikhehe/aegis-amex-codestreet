@@ -11,6 +11,81 @@ threshold changes, these numbers change with it.
 
 ---
 
+## Calibration — every constant carries its source
+
+Payment *behaviour* is grounded in published card statistics. The *agentic
+overlay* is stated as an explicit assumption, because agentic commerce launched
+in 2025–26 and there is no public dataset of AI-agent-initiated card payments.
+
+| Constant | Value | Source |
+|---|---|---|
+| Average transaction | $114 → ₹10,032 | Capital One Shopping Research (2026). Cross-check: Fortunly reports $98; we use 114 and note the band. |
+| Transactions per cardholder/month | 16 | Capital One Shopping Research (2026) |
+| Agent-led share of card activity | 35% | **ASSUMPTION** — no public data exists |
+| USD→INR | 88.0 | **ASSUMPTION** — set to spot rate on demo day |
+| Violation base rate | 0.40% | Inside the published band: PaySim 0.13%, Kaggle ULB 0.17%, Sparkov 0.52% |
+
+### Measured against those targets
+
+| Metric | Generated | Target |
+|---|---|---|
+| Mean amount | ₹7,472 | ₹10,032 (74%) |
+| Median amount | ₹2,704 | — |
+| Mean/median ratio | 2.76 | heavy-tailed, 2–3 |
+| Violation base rate | 0.425% | 0.40% |
+| False-block rate | 0.00% | <2% |
+
+The mean sits at 74% of benchmark because the mandate classes are Indian
+business categories with lower typical values than the US consumer average the
+benchmark measures. The *shape* — log-normal, heavy-tailed, mean ≈ 2.8× median —
+is what matters for exercising ceilings and velocity, and it matches.
+
+---
+
+## Two corpora, never mixed
+
+This is the most important design decision in the seed, and it exists because
+of a real mistake.
+
+An earlier corpus ran at a **12% violation rate** — thirty times the published
+band — because the mix had been tuned for demo density. A governance product
+that overstates its own threat rate is refuted by its own evidence.
+
+The fix is the standard practice in fraud research: report a **base-rate
+realistic** corpus *and* a **balanced evaluation set**, and never average them.
+
+| | Main corpus | Adversarial set |
+|---|---|---|
+| Size | 8,000 actions | 200 actions |
+| Violation rate | 0.425% (published band) | 100% (every row labelled) |
+| Used for | block rate, false-block rate, verdict mix | detection rate by violation type |
+| Column | `seed_corpus = 'main'` | `seed_corpus = 'adversarial'` |
+
+Both live in the same table and the same hash chain — the ledger is one chain —
+but `seed_corpus` keeps them separable so a reviewer can re-derive either metric
+independently. Averaging them together would reproduce exactly the error this
+column exists to prevent.
+
+### Why 8,000 and not 25,000
+
+At the published rate the extra 17,000 rows add no information a reviewer could
+not get from 8,000: the same distribution, the same verdict mix, the same
+false-block denominator. 8,000 spans 30 days at ~265 decisions a day, which is
+enough for the hourly charts and velocity breakers to have genuine structure,
+and it seeds in ~30 seconds rather than ~3 minutes.
+
+### Detection on the adversarial set
+
+| Violation type | n | Caught | Denied |
+|---|---|---|---|
+| prohibited_attribute | 56 | 100% | 100% |
+| out_of_purpose | 57 | 100% | 100% |
+| prompt_injection | 23 | 100% | 100% |
+| exfiltration_ship_to | 19 | 100% | 100% |
+| in_purpose_over_ceiling | 45 | 100% | 0% (STEP_UP — correct: legitimate but needs a human) |
+
+---
+
 ## Why simulated data is the right answer here
 
 The reference architecture has seven data inputs. Six of them are either the

@@ -275,6 +275,7 @@ def decide(
     now: Optional[datetime] = None,
     card_member_id: Optional[str] = None,
     seed_kind: Optional[str] = None,
+    seed_corpus: Optional[str] = None,
 ) -> tuple[Decision, LedgerEntry, Optional[dict[str, Any]]]:
     """Evaluate, persist and chain one action.
 
@@ -321,7 +322,9 @@ def decide(
     # roll back and no verdict is returned.
     try:
         ledger_row = append_to_ledger(session, decision)
-        session.add(_projection(decision, action, agent_row, card_member_id, seed_kind))
+        session.add(
+            _projection(decision, action, agent_row, card_member_id, seed_kind, seed_corpus)
+        )
         session.flush()
     except Exception:
         session.rollback()
@@ -354,6 +357,7 @@ def _projection(
     agent_row: AgentRow,
     card_member_id: Optional[str],
     seed_kind: Optional[str] = None,
+    seed_corpus: Optional[str] = None,
 ) -> DecisionRow:
     from .seed.distribution import LEGITIMATE_KINDS
     conf = decision.conformance
@@ -392,6 +396,7 @@ def _projection(
         features=to_json_primitives(decision.features),
         seed_kind=seed_kind,
         seed_legitimate=(None if seed_kind is None else seed_kind in LEGITIMATE_KINDS),
+        seed_corpus=seed_corpus,
         step_up_state=("pending" if decision.verdict.value == "STEP_UP" else None),
         latency_ms=decision.latency_ms,
         decided_at=decision.decided_at,

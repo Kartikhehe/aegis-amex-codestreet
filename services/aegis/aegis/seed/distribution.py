@@ -46,6 +46,46 @@ from decimal import Decimal
 from typing import Any
 
 # ---------------------------------------------------------------------------
+# CALIBRATION CONSTANTS
+#
+# Every value here is either a PUBLISHED statistic with its source, or an
+# explicitly-labelled assumption where no public data exists. Agentic commerce
+# launched in 2025-26, so there is no public dataset of AI-agent-initiated card
+# payments: we ground payment BEHAVIOUR in published card statistics and state
+# the agentic overlay as an assumption.
+# ---------------------------------------------------------------------------
+
+# PUBLISHED: average US credit-card transaction value.
+#   Capital One Shopping Research, "Cash vs Credit Card Spending Statistics"
+#   (2026): "The average credit card transaction in the U.S. is for $114.00."
+#   Cross-check: Fortunly (2026) reports $98. We use 114 and note the band.
+AVG_TXN_USD = 114.00
+USD_TO_INR = 88.0  # ASSUMPTION: set to spot rate on demo day
+AVG_TXN_INR = AVG_TXN_USD * USD_TO_INR  # ~= INR 10,032
+
+# PUBLISHED: transactions per cardholder per month.
+#   Capital One Shopping Research (2026): "The average consumer makes 16 credit
+#   card payments ... per month."
+TXNS_PER_CARDHOLDER_PER_MONTH = 16
+
+# ASSUMPTION: share of card activity that is agent-led. No public dataset
+# exists; agent-led transactions are modelled as a subset of normal activity.
+AGENT_LED_SHARE = 0.35
+
+# PUBLISHED: fraud / violation base rates from the fraud-detection literature.
+#   PaySim ................. 0.13%  (arXiv 2411.00431)
+#   Kaggle ULB creditcard .. 0.17%  (284,807 txns / 492 frauds)
+#   Sparkov ................ 0.52%  (1,842,743 legit / 9,651 fraud)
+# We take 0.40%: inside the published band.
+#
+# WHY THIS MATTERS. An earlier corpus ran at 12% violations -- thirty times the
+# published band -- because the mix was tuned for demo density rather than
+# realism. A governance product that overstates its own threat rate is refuted
+# by its own evidence. Demo density now comes from a SEPARATE adversarial set
+# (see ADVERSARIAL_MIX), never from inflating the main corpus.
+VIOLATION_BASE_RATE = 0.004
+
+# ---------------------------------------------------------------------------
 # Merchants
 # ---------------------------------------------------------------------------
 
@@ -440,14 +480,45 @@ OPERATORS: dict[str, str] = {
 # Within a mandate class, what KIND of action is generated. These are the
 # generator's intentions -- the engine decides the actual verdict.
 ACTION_MIX: dict[str, float] = {
-    "in_purpose_normal": 0.740,      # routine, within ceiling, known merchant
-    "in_purpose_novel_merchant": 0.055,  # first time at this merchant -> STEP_UP
-    "in_purpose_over_ceiling": 0.045,    # above per-transaction limit -> STEP_UP
-    "in_purpose_marginal": 0.040,        # scores in the 0.70-0.85 band -> ALLOW+flag
-    "out_of_purpose": 0.050,             # wrong category entirely -> DENY
-    "prohibited_attribute": 0.045,       # gift cards, crypto, wallets -> DENY
-    "exfiltration_ship_to": 0.015,       # right goods, wrong address -> DENY
-    "prompt_injection": 0.010,           # untrusted override text -> DENY
+    # The MAIN corpus, calibrated to the published violation base rate.
+    #
+    # The four violation kinds below sum to VIOLATION_BASE_RATE (0.40%), split
+    # in the proportions the fraud literature reports for deliberate misuse.
+    # Everything else is legitimate activity -- which is what real card traffic
+    # overwhelmingly is.
+    #
+    # The three "in_purpose_*" kinds that are NOT violations still exercise the
+    # step-up path: a novel merchant or an over-ceiling amount is a legitimate
+    # purchase that needs a human, not an attack. Keeping them at realistic
+    # weight is what produces an honest step-up rate.
+    "in_purpose_normal": 0.8060,          # routine, within ceiling, known merchant
+    "in_purpose_novel_merchant": 0.0700,  # first time here -> STEP_UP
+    "in_purpose_over_ceiling": 0.0600,    # above the limit -> STEP_UP
+    "in_purpose_marginal": 0.0600,        # scores 0.70-0.85 -> ALLOW + flag
+    # --- violations: 0.40% in total, matching the published band -----------
+    "prohibited_attribute": 0.0014,       # gift cards, crypto -> DENY  (35%)
+    "out_of_purpose": 0.0010,             # wrong category      -> DENY  (25%)
+    "exfiltration_ship_to": 0.0008,       # right goods, wrong address (20%)
+    "prompt_injection": 0.0008,           # untrusted override text    (20%)
+}
+
+# The ADVERSARIAL evaluation set: densely labelled, deliberately unrealistic.
+#
+# Why a second corpus rather than enriching the first. At the published 0.4%
+# base rate a 25,000-action corpus contains ~35 gift-card cases -- realistic,
+# but too few to measure detection reliably and too sparse to demonstrate. The
+# standard answer in fraud research is to report a base-rate-realistic corpus
+# AND a balanced evaluation set, and never to mix them.
+#
+# So: headline rates (block rate, false-block rate, verdict mix) come from the
+# main corpus. Detection performance by violation type comes from this set.
+# Every row here is labelled, and the console labels it on screen.
+ADVERSARIAL_MIX: dict[str, float] = {
+    "prohibited_attribute": 0.25,
+    "out_of_purpose": 0.25,
+    "in_purpose_over_ceiling": 0.25,
+    "prompt_injection": 0.15,
+    "exfiltration_ship_to": 0.10,
 }
 
 # GROUND TRUTH. Which generated kinds were legitimate purchases the card member
@@ -478,7 +549,26 @@ STEP_UP_APPROVAL_RATES: dict[str, float] = {
     "scorer_unavailable_fail_closed": 0.65,  # we couldn't check; usually fine
 }
 
-TOTAL_ACTIONS = 25_000
+TOTAL_ACTIONS = 8_000
+"""Size of the MAIN corpus.
+
+Reduced from 25,000. At the published 0.4% violation rate the extra 17,000
+rows add no information a reviewer could not get from 8,000 -- the same
+distribution, the same verdict mix, the same false-block denominator -- while
+tripling seed time and the database. 8,000 spans 30 days at ~265 decisions a
+day, which is enough for the hourly charts and the velocity breakers to have
+genuine structure.
+"""
+
+ADVERSARIAL_ACTIONS = 200
+"""Size of the ADVERSARIAL evaluation set.
+
+Every row is a labelled violation, ~40 per type. Large enough to state a
+detection rate per violation type with a meaningful denominator; small enough
+that nobody could mistake it for traffic. It is never averaged into the
+headline numbers -- see ADVERSARIAL_MIX.
+"""
+
 SEED_DAYS = 30
 
 # Diurnal weights, IST hours 0-23. Commerce concentrates in waking hours.
