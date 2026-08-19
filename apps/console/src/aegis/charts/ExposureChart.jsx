@@ -19,6 +19,7 @@ const ExposureChart = ({ data = [], height = 260 }) => {
     return {
       grid: { top: 8, right: 72, bottom: 8, left: 8, containLabel: true },
       tooltip: {
+        ...c.tooltip,
         trigger: 'item',
         valueFormatter: (value) => formatCurrencyCompact(value),
       },

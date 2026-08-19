@@ -39,6 +39,23 @@ export const useChartPalette = () => {
       textDisabled: resolve(theme.vars.palette.text.disabled),
       divider: resolve(theme.vars.palette.divider),
       surface: resolve(theme.vars.palette.background.elevation2),
+
+      // Tooltip styling, shared by every chart.
+      //
+      // ECharts defaults to a white tooltip with near-black text. On the dark
+      // theme that renders as dark-on-dark -- the text looked like it "turned
+      // black and stayed black" on hover. Theming it here rather than in each
+      // chart means a new chart cannot reintroduce the bug.
+      tooltip: {
+        backgroundColor: resolve(theme.vars.palette.background.elevation3),
+        borderColor: resolve(theme.vars.palette.divider),
+        borderWidth: 1,
+        textStyle: {
+          color: resolve(theme.vars.palette.text.primary),
+          fontSize: 12,
+        },
+        extraCssText: 'border-radius:8px; box-shadow:0 6px 24px rgba(0,0,0,0.28);',
+      },
     };
     // `mode` is the dependency that matters: it is what changes on a toggle.
   }, [theme, mode, isDark]);

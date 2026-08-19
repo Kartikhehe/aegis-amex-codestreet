@@ -20,14 +20,17 @@ show a corrupted chain and a failing verification.
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import select, text
 
 from ..auth.security import DbSession, RequireOperator
 from ..config import get_settings
-from ..db.models import LedgerEntry
+from ..db.models import DecisionRow, LedgerEntry
+from ..engine.types import utcnow
+from ..firestore import get_mirror
 from ..service import verify_ledger
 
 logger = logging.getLogger(__name__)
@@ -198,3 +201,76 @@ def restore(db: DbSession, principal: RequireOperator) -> dict[str, Any]:
     # re-reads the stale objects and reports a break that is no longer there.
     db.expire_all()
     return {"restored": True, "verification": verify_ledger(db).to_dict()}
+
+
+@router.post("/demo/warm-window", summary="DEMO ONLY: make recent activity recent")
+def warm_window(
+    db: DbSession,
+    principal: RequireOperator,
+    hours: int = Query(6, ge=1, le=72, description="Spread activity over this many hours."),
+    count: int = Query(220, ge=10, le=2000, description="How many decisions to bring forward."),
+) -> dict[str, Any]:
+    """Shift the newest seeded decisions into the last few hours.
+
+    WHY THIS EXISTS. The fleet tiles measure a rolling 24-hour window, which is
+    the right window for an operations screen. But a seeded corpus ages: a demo
+    given two days after seeding shows four zeros, which is arithmetically
+    correct and completely useless on a projector.
+
+    The alternative -- reseeding before every demo -- takes minutes and destroys
+    any manual transactions the presenter has staged. This moves timestamps
+    instead, so the SAME decisions the engine already produced now fall inside
+    the window.
+
+    WHAT IT DOES NOT DO. It does not invent decisions, and it does not change
+    verdicts, amounts, reasons or scores. Every row was produced by the real
+    engine; only the PROJECTION's `decided_at` moves.
+
+    THE LEDGER IS NOT TOUCHED, and this is the important part. `decided_at` is
+    inside the hashed ledger payload, but the ledger keeps its own immutable
+    copy -- the `decisions` table is a queryable projection the console reads.
+    So the chain still verifies afterwards, and the ledger continues to hold the
+    true original timestamp. The two deliberately disagree, and the response
+    says so: an audit would find the ledger, not the projection.
+
+    This is honest to demonstrate. If asked, the answer is that the evidence
+    chain was never altered -- only the display window was moved so a
+    24-hour operations screen has something to show.
+    """
+    from sqlalchemy import text
+
+    rows = list(
+        db.scalars(
+            select(DecisionRow).order_by(DecisionRow.decided_at.desc()).limit(count)
+        )
+    )
+    if not rows:
+        raise HTTPException(status_code=409, detail="No decisions to bring forward.")
+
+    now = utcnow().replace(tzinfo=None)
+    window = timedelta(hours=hours)
+    # Spread them across the window newest-last, so the live stream reads as a
+    # plausible trickle of activity rather than a single burst.
+    step = window / max(len(rows) - 1, 1)
+    for index, row in enumerate(reversed(rows)):
+        row.decided_at = now - window + (step * index)
+        if row.step_up_resolved_at is not None:
+            row.step_up_resolved_at = row.decided_at + timedelta(minutes=3)
+    db.commit()
+
+    mirror = get_mirror()
+    for row in rows:
+        mirror.mirror_decision(row)
+
+    return {
+        "moved": len(rows),
+        "window_hours": hours,
+        "oldest": (now - window).isoformat() + "Z",
+        "newest": now.isoformat() + "Z",
+        "ledger_note": (
+            "The ledger was NOT modified and still verifies: it keeps its own "
+            "immutable copy of decided_at. Only the queryable projection moved, "
+            "so the console's 24-hour window has activity to show. The ledger "
+            "retains the true original timestamps."
+        ),
+    }

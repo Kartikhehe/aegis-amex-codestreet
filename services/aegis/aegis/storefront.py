@@ -51,12 +51,19 @@ class Product:
     keywords: tuple[str, ...] = ()
     attributes: tuple[str, ...] = ()
 
+    # The merchant's own reference price, mirroring ACP's `list_price`. Present
+    # only where a real merchant feed would carry one, so the diligence
+    # price-sanity check has something to compare against -- and is honestly
+    # "unavailable" on products that have none.
+    list_price: Decimal | None = None
+
     def to_json(self) -> dict:
         return {
             "sku": self.sku,
             "label": self.label,
             "unit_amount": str(self.unit_amount),
             "attributes": list(self.attributes),
+            "list_price": None if self.list_price is None else str(self.list_price),
         }
 
 
@@ -202,6 +209,54 @@ STOREFRONTS: tuple[Storefront, ...] = (
             ),
         ),
     ),
+    # --- dining: food delivery, MCC 5814 ---------------------------------
+    # Dining is one of the two heaviest agentic use cases (with travel), and
+    # the engine already has a `team_meals` mandate class and these merchants
+    # -- they simply had no storefront to walk into.
+    Storefront(
+        merchant_id="mch_swiggy",
+        name="Swiggy",
+        category="5814",
+        kind="dining",
+        tagline="Food delivery for the office.",
+        requires_login=True,
+        products=(
+            Product("sw-lunch", "Team lunch (8 pax)", _d("2400"),
+                    ("team lunch", "lunch", "meal", "meals"), (), _d("2400")),
+            Product("sw-dinner", "Working dinner (6 pax)", _d("1900"),
+                    ("dinner", "working dinner"), (), _d("1900")),
+            Product("sw-thali", "Thali, per person", _d("240"),
+                    ("thali", "veg meal"), (), _d("240")),
+            Product("sw-snacks", "Snack platter", _d("650"),
+                    ("snacks", "platter", "samosa"), (), _d("650")),
+            Product("sw-dessert", "Dessert box", _d("420"), ("dessert", "sweets", "cake")),
+            # Alcohol on a food-delivery order: permitted by MCC, vetoed by
+            # every seeded mandate. The dining equivalent of the gift-card trap.
+            Product("sw-beer", "Beer 6-pack", _d("900"),
+                    ("beer", "alcohol", "drinks"), ("alcohol",)),
+        ),
+        ship_to_options=("office", "home", "other"),
+    ),
+    # --- dining: coffee, MCC 5812 ----------------------------------------
+    Storefront(
+        merchant_id="mch_barista",
+        name="Barista Coffee",
+        category="5812",
+        kind="dining",
+        tagline="Coffee and client meetings.",
+        requires_card_tap=True,
+        ship_to_options=(),
+        products=(
+            Product("ba-coffee", "Coffee", _d("180"),
+                    ("coffee", "cappuccino", "latte", "espresso"), (), _d("180")),
+            Product("ba-tea", "Tea", _d("140"), ("tea", "chai"), (), _d("140")),
+            Product("ba-sandwich", "Sandwich", _d("260"),
+                    ("sandwich", "panini"), (), _d("260")),
+            Product("ba-cake", "Slice of cake", _d("220"), ("cake", "pastry", "dessert")),
+            Product("ba-meeting", "Client meeting tray (6 pax)", _d("1450"),
+                    ("meeting", "client", "tray"), (), _d("1450")),
+        ),
+    ),
     # --- fuel, MCC 5541 ---------------------------------------------------
     Storefront(
         merchant_id="mch_indianoil",
@@ -285,6 +340,8 @@ SHOP_AGENT_CLASSES: dict[str, tuple[str, ...]] = {
     "mch_freshmart_gift": ("household_pantry",),
     "mch_indigo": ("business_travel", "commuter_transport"),
     "mch_tajhotels": ("business_travel",),
+    "mch_swiggy": ("team_meals", "travel_snacks"),
+    "mch_barista": ("team_meals", "travel_snacks"),
     "mch_indianoil": ("fleet_fuel", "commuter_transport"),
     "mch_amazonbiz": ("office_supplies", "broad_procurement"),
     "mch_wazirx": ("broad_procurement", "household_pantry"),
@@ -297,6 +354,8 @@ SHOP_GREETINGS: dict[str, str] = {
     "mch_freshmart_gift": "Gift cards and vouchers counter. What are you after?",
     "mch_indigo": "I book flights for the team. Where are you headed?",
     "mch_tajhotels": "I handle hotel bookings. Which city and how many nights?",
+    "mch_swiggy": "Office food orders. What are we feeding the team?",
+    "mch_barista": "Coffee counter. What can I get you?",
     "mch_indianoil": "Fuel stop. How much are we filling today?",
     "mch_amazonbiz": "Office supplies desk. What does the office need?",
     "mch_wazirx": "Digital asset desk. What would you like to buy?",
@@ -458,6 +517,7 @@ def parse_with_rules(prompt: str, shop: Storefront) -> ParsedCart:
             "quantity": _quantity_near(prompt, start),
             "unit_amount": str(product.unit_amount),
             "attributes": list(product.attributes),
+            "list_price": None if product.list_price is None else str(product.list_price),
         }
 
     cart.items = list(chosen.values())
@@ -665,6 +725,9 @@ def parse_with_llm(prompt: str, shop: Storefront) -> ParsedCart | None:
                     "quantity": quantity,
                     "unit_amount": str(product.unit_amount),
                     "attributes": list(product.attributes),
+                    "list_price": (
+                        None if product.list_price is None else str(product.list_price)
+                    ),
                 }
             )
             continue

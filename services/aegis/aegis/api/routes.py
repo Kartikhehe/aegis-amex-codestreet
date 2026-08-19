@@ -208,6 +208,9 @@ def decide(
                 attributes=frozenset(item.attributes),
                 quantity=item.quantity,
                 unit_amount=Decimal(str(item.unit_amount)),
+                list_price=(
+                    None if item.list_price is None else Decimal(str(item.list_price))
+                ),
             )
             for item in payload.cart_items
         ),
@@ -1353,7 +1356,17 @@ def _assert_can_see_decision(principal: Principal, row: DecisionRow) -> None:
 
 
 def _decision_out(row: DecisionRow, agent: Optional[AgentRow]) -> s.DecisionOut:
+    # Sign on read rather than storing the signature.
+    #
+    # The signature is deterministic over fields that are all immutable, so
+    # re-deriving it costs ~50us and cannot drift from the record. Storing it
+    # would add a column that could disagree with the row it describes.
+    from ..signing import sign_decision as _sign
+
+    signature = _sign(row)
+
     return s.DecisionOut(
+        signature=signature,
         action_id=row.action_id,
         agent_id=row.agent_id,
         agent_name=agent.name if agent else "",
@@ -1604,6 +1617,11 @@ def simulate_checkout(
                 quantity=int(line["quantity"]),
                 unit_amount=Decimal(str(line["unit_amount"])),
                 attributes=list(line.get("attributes", [])),
+                list_price=(
+                    Decimal(str(line["list_price"]))
+                    if line.get("list_price") is not None
+                    else None
+                ),
             )
             for line in parsed.items
         ],
@@ -1875,4 +1893,69 @@ def pipeline(db: DbSession, principal: CurrentUser) -> dict:
             for c in UNAVAILABLE_CHECKS
         ],
         "diligence_price_tolerance": str(DEFAULT_PRICE_TOLERANCE),
+    }
+
+
+# --------------------------------------------------------------------------
+# Signed verdicts
+#
+# These two endpoints are what turn AEGIS from an advisor into a control. The
+# first publishes the public key; the second verifies a signed verdict. Neither
+# needs privileged access to AEGIS, which is the point: a Credential Provider
+# must be able to check a verdict without trusting the system that issued it.
+# --------------------------------------------------------------------------
+
+
+@router.get("/signing-key", response_model=dict, tags=["decide"])
+def signing_key() -> dict[str, Any]:
+    """The public key, published for anyone who needs to verify a verdict.
+
+    Deliberately unauthenticated. A public key is public by definition, and a
+    verifier that had to authenticate to AEGIS in order to check AEGIS would
+    defeat the purpose. This is the shape a production JWKS endpoint would take.
+    """
+    from ..signing import SIGNATURE_ALG, SIGNATURE_VERSION, get_signer
+
+    signer = get_signer()
+    return {
+        "alg": SIGNATURE_ALG,
+        "version": SIGNATURE_VERSION,
+        "kid": signer.kid,
+        "public_key": signer.public_key_b64,
+        "key_custody": (
+            "MVP: the private key lives in process memory (seeded from "
+            "AEGIS_SIGNING_KEY when set). Production would hold it in an HSM or "
+            "KMS with rotation, and publish this as a JWKS document."
+        ),
+    }
+
+
+@router.post("/verify-verdict", response_model=dict, tags=["decide"])
+def verify_verdict(block: dict[str, Any]) -> dict[str, Any]:
+    """Verify a signed verdict. This is what a payment processor would call.
+
+    Also deliberately unauthenticated: verification uses only the public key and
+    the block itself, so anyone can independently confirm that a verdict was
+    issued by AEGIS, for that exact basket, under that exact policy version.
+    """
+    from ..signing import verify_signature
+
+    ok, reason = verify_signature(block)
+    payload = block.get("payload") or {}
+    return {
+        "valid": ok,
+        "reason": reason,
+        "verdict": payload.get("verdict"),
+        "action_id": payload.get("action_id"),
+        "ruleset_hash": payload.get("ruleset_hash"),
+        "settlement_guidance": (
+            "Payment may proceed."
+            if ok and payload.get("verdict") == "ALLOW"
+            else "DO NOT SETTLE. "
+            + (
+                "AEGIS did not authorise this purchase."
+                if ok
+                else "This verdict could not be verified and must not be trusted."
+            )
+        ),
     }

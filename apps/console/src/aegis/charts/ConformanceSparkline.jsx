@@ -22,6 +22,7 @@ const ConformanceSparkline = ({
     () => ({
       grid: { top: 16, right: 12, bottom: 24, left: 36 },
       tooltip: {
+        ...c.tooltip,
         trigger: 'axis',
         valueFormatter: (value) => Number(value).toFixed(2),
       },

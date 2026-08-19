@@ -30,6 +30,7 @@ const BlockRateChart = ({ series = [], height = 260 }) => {
         textStyle: { color: c.textSecondary, fontSize: 11 },
       },
       tooltip: {
+        ...c.tooltip,
         trigger: 'axis',
         valueFormatter: (value) => `${(Number(value) * 100).toFixed(2)}%`,
       },

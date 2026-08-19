@@ -80,6 +80,14 @@ class CartItemIn(ApiModel):
     attributes: list[str] = Field(default_factory=list)
     quantity: int = 1
     unit_amount: Decimal = Decimal("0")
+    list_price: Optional[Decimal] = Field(
+        None,
+        description=(
+            "Merchant-asserted reference price, mirroring ACP's line-item "
+            "list_price. Used by the diligence price-sanity check; it is a "
+            "signal, not an independent benchmark."
+        ),
+    )
 
 
 class DecideRequest(ApiModel):
@@ -145,6 +153,20 @@ class ConformanceOut(ApiModel):
     cached: bool = False
 
 
+class VerdictSignatureOut(ApiModel):
+    """The signed assertion that travels with the authorisation.
+
+    Without this an AEGIS verdict is advice that anything downstream can ignore
+    silently. Signed, it becomes a condition a Credential Provider can verify
+    before releasing a payment credential.
+    """
+
+    alg: str
+    kid: str
+    signature: str
+    payload: dict[str, Any]
+
+
 class LedgerRefOut(ApiModel):
     sequence: int
     record_id: str
@@ -198,6 +220,7 @@ class DecisionOut(ApiModel):
     decided_at: datetime
     ledger: Optional[LedgerRefOut] = None
     shadow: Optional[ShadowOut] = None
+    signature: Optional[VerdictSignatureOut] = None
 
 
 class DecisionPage(ApiModel):

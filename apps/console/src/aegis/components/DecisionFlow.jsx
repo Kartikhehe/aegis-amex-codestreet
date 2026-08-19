@@ -697,6 +697,21 @@ const DecisionFlow = ({ decision, expanded = false, onDrill }) => {
         </Panel>
       )}
 
+      {/* ---- the signature ------------------------------------------ */}
+      {decision.signature && (
+        <Panel title="Signed verdict" tone={tone === 'neutral' ? undefined : tone}>
+          <Stack spacing={0.75}>
+            <Typography variant="caption" sx={{ color: 'text.secondary', lineHeight: 1.6 }}>
+              This verdict is cryptographically signed. A payment processor can verify it before
+              settling, so an AEGIS decision cannot be ignored or forged in transit.
+            </Typography>
+            <KeyValue label="Algorithm" value={decision.signature.alg} mono />
+            <KeyValue label="Key" value={decision.signature.kid} mono />
+            <KeyValue label="Signature" value={shortHash(decision.signature.signature, 20)} mono />
+          </Stack>
+        </Panel>
+      )}
+
       {/* ---- the record --------------------------------------------- */}
       <Panel title="What was written down" tone={tone === 'neutral' ? undefined : tone}>
         <Stack spacing={0.75}>

@@ -334,7 +334,7 @@ const PolicyStudio = () => {
           </Paper>
         </Grid>
 
-        {/* ---- diff vs deployed ----------------------------------------- */}
+        {/* ---- what changed vs the live policy ---------------------------- */}
         <Grid size={{ xs: 12, lg: 7 }}>
           <Paper sx={{ p: 2.5 }}>
             <Stack
@@ -344,7 +344,7 @@ const PolicyStudio = () => {
               sx={{ mb: 2 }}
             >
               <Typography variant="h6" sx={{ fontWeight: 700 }}>
-                Diff vs deployed
+                What you changed
               </Typography>
               {deployed && (
                 <Stack direction="row" spacing={1} alignItems="center">
@@ -371,7 +371,7 @@ const PolicyStudio = () => {
           <Paper sx={{ p: 2.5 }}>
             <Stack spacing={0.25} sx={{ mb: 2 }}>
               <Typography variant="h6" sx={{ fontWeight: 700 }}>
-                <Term term="blast_radius">Blast radius</Term>
+                <Term term="blast_radius">What this would have done</Term>
               </Typography>
               <Typography variant="body2" sx={{ color: 'text.secondary' }}>
                 Replayed against real recorded traffic, not an estimate.

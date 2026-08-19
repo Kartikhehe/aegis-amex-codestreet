@@ -29,86 +29,104 @@ import { formatCurrency, formatScore } from 'aegis/format';
 const RULE_INFO = {
   // ---- 1. Identity: is this agent real, live, and acting for someone? ----
   fleet_stop: {
+    passed: 'The fleet is operational — no emergency stop is engaged.',
     question: 'Is the whole fleet halted by an operator?',
     source: 'fleet_state row, read on every decision',
   },
   agent_breaker: {
+    passed: "This agent's circuit breaker is clear.",
     question: 'Has this agent tripped a circuit breaker?',
     source: 'breaker_tripped on the agent, set by the breaker sweep',
   },
   operator_revoked: {
+    passed: 'The operator is registered and in good standing.',
     question: 'Is the operator still allowed to act?',
     source: 'revoked flag on the operator record',
   },
   agent_inactive: {
+    passed: 'This agent is active and authorised to act.',
     question: 'Is this agent active, not paused or revoked?',
     source: 'status on the agent record',
   },
   mandate_expired: {
+    passed: 'The authority is signed and still in date.',
     question: 'Is the authority still in date?',
     source: 'expires_at on the signed mandate, against decision time',
   },
   delegation_depth: {
+    passed: 'Authority was passed down within permitted depth.',
     question: 'Was authority passed down further than permitted?',
     source: 'delegation chain walked to the root mandate',
   },
 
   // ---- 2. Authority: was it authorised to buy THIS, here, delivered there?
   suspected_injection: {
+    passed: 'No manipulation attempt found in the untrusted text.',
     question: 'Was the agent fed text trying to override its limits?',
     source: 'deterministic phrase match on the untrusted text, pre-model',
   },
   ship_to_mismatch: {
+    passed: 'The goods are going to the address the card member authorised.',
     question: 'Are the goods going where the card member authorised?',
     source: "ship_to on the request against the mandate's address",
   },
 
   // ---- 3. Compliance: may this be sold on a card at all? ----------------
   prohibited_goods: {
+    passed: 'Nothing in this basket is unlawful to buy on a card.',
     question: 'Is this lawful to buy on a card at all?',
     source: 'deterministic screen of the basket against prohibited categories',
   },
   prohibited_attribute_veto: {
+    passed: 'The basket contains nothing the card member prohibits.',
     question: 'Does the basket contain something the member never permits?',
     source: 'cart + merchant attributes against the mandate prohibitions',
   },
 
   // ---- 4. Conformance: does it match the purpose? (the only model) ------
   conformance_deny_floor: {
+    passed: 'The purchase matches the authorised purpose.',
     question: 'Does this match the stated purpose at all?',
     source: 'conformance score against the deny floor',
   },
   conformance_review_floor: {
+    passed: 'The match is clear enough to proceed without asking.',
     question: 'Does it match clearly enough to pass unseen?',
     source: 'conformance score against the review floor',
   },
 
   // ---- 5. Limits: ceilings, velocity, familiarity -----------------------
   amount_above_ceiling: {
+    passed: 'Within both the per-purchase and daily limits.',
     question: 'Is it within the per-purchase and daily limits?',
     source: "live SUM of today's allowed spend for this agent",
   },
   velocity_limit: {
+    passed: 'This agent is inside its purchase count for today.',
     question: 'Has this agent bought too many times today?',
     source: "live COUNT of today's allowed decisions for this agent",
   },
   novel_merchant: {
+    passed: 'This agent has bought from this merchant before.',
     question: 'Has this agent used this merchant before?',
     source: "DISTINCT merchants from this agent's own decision history",
   },
 
   // ---- 6. Diligence: was this a COMPETENT purchase? --------------------
   diligence_below_bar: {
+    passed: 'The purchase meets the diligence bar the card member set.',
     question: 'Was this a careful purchase, not merely an authorised one?',
     source: 'request text vs basket, and paid vs merchant-asserted list price',
   },
 
   // ---- 7. Outcome ------------------------------------------------------
   conformance_marginal: {
+    passed: 'A weaker-than-usual match: allowed, and flagged.',
     question: 'A weaker-than-usual match: allow, but flag it.',
     source: 'conformance score against the marginal floor',
   },
   allow: {
+    passed: 'Everything checked out.',
     question: 'Everything checked out.',
     source: 'no earlier rule matched',
   },
@@ -117,6 +135,18 @@ const RULE_INFO = {
 // Kept for callers that only want the question.
 const RULE_QUESTIONS = Object.fromEntries(
   Object.entries(RULE_INFO).map(([key, info]) => [key, info.question]),
+);
+
+/**
+ * What a check reads as once it has ANSWERED.
+ *
+ * A pipeline that keeps asking "is this agent active?" after establishing that
+ * it is makes a clean decision look uncertain. A passed check states its
+ * finding; an unrun or decisive one keeps the question, because there the
+ * question is still the honest framing.
+ */
+const RULE_PASSED = Object.fromEntries(
+  Object.entries(RULE_INFO).map(([key, info]) => [key, info.passed ?? info.question]),
 );
 
 // Rules whose job is to stop bad things. A match on one of those is a BLOCK
@@ -282,12 +312,18 @@ export const buildDecisionFlow = (decision) => {
           verdict: null,
         };
       }
+      const status = asStatus(rule, stoppedAt, rule.index);
       return {
         name,
-        question: RULE_QUESTIONS[name] ?? '',
+        // A check that ran and found nothing states its finding; a decisive or
+        // unrun one keeps the question, where the question is still honest.
+        question:
+          status === 'passed'
+            ? (RULE_PASSED[name] ?? RULE_QUESTIONS[name] ?? '')
+            : (RULE_QUESTIONS[name] ?? ''),
         source: RULE_INFO[name]?.source ?? '',
         detail: rule.detail || '',
-        status: asStatus(rule, stoppedAt, rule.index),
+        status,
         // A matched clearance rule is a pass, not a block.
         decisive: rule.matched,
         isClearance: CLEARANCE_RULES.has(name),
