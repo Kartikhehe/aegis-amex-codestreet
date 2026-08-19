@@ -89,7 +89,23 @@ export const useLiveDecisions = (swrResult, { max = 60, scope, enabled = true } 
 
   return useMemo(() => {
     if (enabled && subscribed && live) {
-      return { ...swrResult, data: { items: live, total: live.length }, isLive: true };
+      // The live feed carries only the newest rows -- it is a tail, not a
+      // census. So it supplies `items` and nothing else: `total` and `counts`
+      // stay whatever REST reported for the full filtered set.
+      //
+      // Overwriting them was a real bug: total became live.length, so the
+      // verdict chips dropped from "All 8,274" to "All 60" every time the
+      // subscription took over -- which is what happened on re-selecting a
+      // range, because that re-enables the feed.
+      return {
+        ...swrResult,
+        data: {
+          ...(swrResult.data ?? {}),
+          items: live,
+          total: swrResult.data?.total ?? live.length,
+        },
+        isLive: true,
+      };
     }
     return { ...swrResult, isLive: false };
   }, [enabled, subscribed, live, swrResult]);
