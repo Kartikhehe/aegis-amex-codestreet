@@ -214,15 +214,18 @@ const FleetOverview = () => {
         <Grid size={{ xs: 12, xl: 4 }}>
           <Paper sx={{ p: 2, height: { xs: 'auto', xl: 560 }, overflowY: 'auto' }}>
             <Typography variant="h6" sx={{ fontWeight: 700, mb: 2 }}>
-              <Term term="circuit_breaker">Armed breakers</Term>
+              {/* "Armed breakers" is trade jargon. What an operator actually
+                  needs to know is which agents have been stopped automatically
+                  because their recent PATTERN looked wrong. */}
+              <Term term="circuit_breaker">Agents stopped automatically</Term>
             </Typography>
 
             {(incidents ?? []).length === 0 ? (
               <EmptyState
                 dense
                 icon="material-symbols:shield-outline-rounded"
-                title="No breakers armed"
-                body="Circuit breakers appear here when an agent's recent behaviour looks wrong as a pattern rather than as a single purchase."
+                title="No agents stopped"
+                body="An agent appears here when AEGIS halts it on its own — because its recent behaviour looks wrong as a pattern, not because of any single purchase."
               />
             ) : (
               <Stack spacing={1}>
