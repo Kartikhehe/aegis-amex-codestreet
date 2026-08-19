@@ -287,8 +287,10 @@ def list_decisions(
     elif principal.role == Role.AGENT_OPERATOR:
         filters.append(DecisionRow.operator_id == principal.operator_id)
 
+    verdict_filter = None
     if verdict:
-        filters.append(DecisionRow.verdict == verdict)
+        verdict_filter = DecisionRow.verdict == verdict
+        filters.append(verdict_filter)
     if agent_id:
         filters.append(DecisionRow.agent_id == agent_id)
     if flagged is not None:
@@ -310,10 +312,28 @@ def list_decisions(
     rows = list(
         db.scalars(stmt.order_by(DecisionRow.decided_at.desc()).limit(limit).offset(offset))
     )
+
+    # TRUE totals per verdict, for the whole filtered set -- not just the page.
+    #
+    # The console shows verdict chips ("Allowed 43", "Denied 6"). Counting those
+    # from the returned page caps every number at `limit`, so a stream showing
+    # 60 of 8,267 rows claimed there were 60 decisions in total. The counts have
+    # to be a GROUP BY over the same filters, or they describe the page rather
+    # than the data.
+    verdict_stmt = select(DecisionRow.verdict, func.count(DecisionRow.action_id))
+    for f in filters:
+        # Skip the caller's own verdict filter: the chips exist to show what
+        # ELSE is there, so counting only the selected verdict would collapse
+        # every other chip to zero.
+        if verdict is None or f is not verdict_filter:
+            verdict_stmt = verdict_stmt.where(f)
+    counts = {v: n for v, n in db.execute(verdict_stmt.group_by(DecisionRow.verdict)).all()}
+
     agents = {r.agent_id: r for r in db.scalars(select(AgentRow))}
     return s.DecisionPage(
         items=[_decision_out(r, agents.get(r.agent_id)) for r in rows],
         total=total,
+        counts=counts,
         limit=limit,
         offset=offset,
     )

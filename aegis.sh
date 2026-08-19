@@ -294,3 +294,12 @@ case "${1:-status}" in
     sed -n '3,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
     ;;
 esac
+
+
+# run this ~5 minutes before you present
+# TOKEN=$(curl -s -X POST localhost:8000/api/auth/login \
+#   -H 'Content-Type: application/json' \
+#   -d '{"email":"operator@aegis.test","password":"password123"}' | jq -r .token)
+
+# curl -X POST "localhost:8000/api/demo/warm-window?hours=6&count=240" \
+#   -H "Authorization: Bearer $TOKEN"

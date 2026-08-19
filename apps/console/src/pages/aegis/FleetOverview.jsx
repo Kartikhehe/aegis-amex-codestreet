@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Alert, Box, Grid, Paper, Stack, Typography } from '@mui/material';
+import { Alert, Box, Button, Grid, Paper, Stack, Typography } from '@mui/material';
 import BlockRateChart from 'aegis/charts/BlockRateChart';
 import ExposureChart from 'aegis/charts/ExposureChart';
 import DateRangeFilter, { buildRange } from 'aegis/components/DateRangeFilter';
@@ -32,6 +32,15 @@ const TILE_ICONS = {
 };
 
 const TILE_TONES = { blocked: 'danger', step_up: 'warning' };
+
+// Windows for the KPI tiles. Capped at 30 days because the overview endpoint
+// aggregates in memory -- a wider window would scan the whole ledger on every
+// 5-second poll.
+const TILE_WINDOWS = [
+  { hours: 24, label: '24h' },
+  { hours: 24 * 7, label: '7d' },
+  { hours: 24 * 30, label: '30d' },
+];
 
 const BreakerRow = ({ incident }) => (
   <Stack
@@ -84,19 +93,30 @@ const BreakerRow = ({ incident }) => (
 const FleetOverview = () => {
   const [selected, setSelected] = useState(null);
 
-  const { data: overview } = useOverview(24);
+  // The KPI tiles carry their own window, separate from the stream's. An
+  // operations screen defaults to "now"; a reviewer needs to widen it.
+  const [tileHours, setTileHours] = useState(24);
+  const { data: overview } = useOverview(tileHours);
   // Firestore when it is available, REST when it is not. The screen does not
   // need to know which, and shows a "live" marker only when it truly is.
   const [streamRange, setStreamRange] = useState(() => buildRange('all'));
   const windowed = Boolean(streamRange.since || streamRange.until);
 
+  // The stream pages server-side: 60 rows at a time out of however many match.
+  const PAGE = 60;
+  const [page, setPage] = useState(0);
+  const [verdictFilter, setVerdictFilter] = useState('ALL');
+
   const restDecisions = useDecisions({
-    limit: 60,
+    limit: PAGE,
+    offset: page * PAGE,
+    ...(verdictFilter !== 'ALL' ? { verdict: verdictFilter } : {}),
     ...(streamRange.since ? { since: streamRange.since } : {}),
     ...(streamRange.until ? { until: streamRange.until } : {}),
   });
   // Live updates only make sense for an open-ended window.
-  const decisionsQuery = useLiveDecisions(restDecisions, { max: 60, enabled: !windowed });
+  const browsing = windowed || page > 0 || verdictFilter !== 'ALL';
+  const decisionsQuery = useLiveDecisions(restDecisions, { max: PAGE, enabled: !browsing });
   const incidentsQuery = useLiveIncidents(useIncidents({ limit: 8 }), { max: 8 });
   const { data: decisionPage } = decisionsQuery;
   const { data: incidents } = incidentsQuery;
@@ -120,24 +140,46 @@ const FleetOverview = () => {
         title="Fleet overview"
         question="What is happening now?"
         actions={
-          overview?.ruleset_hash && (
-            <Stack direction="row" spacing={0.75} alignItems="center">
-              <Typography variant="caption" sx={{ color: 'text.disabled' }}>
-                <Term term="ruleset_hash">Policy</Term>
-              </Typography>
-              <Mono variant="monoCaption" sx={{ color: 'text.secondary' }}>
-                {overview.ruleset_hash.slice(0, 8)}
-              </Mono>
+          <Stack direction="row" spacing={2} alignItems="center" sx={{ flexWrap: 'wrap' }}>
+            {/* Window for the four tiles. Small, text-only buttons rather than
+                a dropdown: three options do not justify a menu, and the
+                current window should be readable without a click. */}
+            <Stack direction="row" spacing={0.25} alignItems="center">
+              {TILE_WINDOWS.map((option) => (
+                <Button
+                  key={option.hours}
+                  size="small"
+                  onClick={() => setTileHours(option.hours)}
+                  sx={{
+                    minWidth: 0,
+                    px: 1,
+                    color: tileHours === option.hours ? 'primary.main' : 'text.disabled',
+                    fontWeight: tileHours === option.hours ? 700 : 500,
+                  }}
+                >
+                  {option.label}
+                </Button>
+              ))}
             </Stack>
-          )
+            {overview?.ruleset_hash && (
+              <Stack direction="row" spacing={0.75} alignItems="center">
+                <Typography variant="caption" sx={{ color: 'text.disabled' }}>
+                  <Term term="ruleset_hash">Policy</Term>
+                </Typography>
+                <Mono variant="monoCaption" sx={{ color: 'text.secondary' }}>
+                  {overview.ruleset_hash.slice(0, 8)}
+                </Mono>
+              </Stack>
+            )}
+          </Stack>
         }
       />
 
       {staleWindow && (
         <Alert severity="info" variant="outlined" sx={{ mb: { xs: 2, md: 3 } }}>
-          No decisions in the last 24 hours. The ledger holds{' '}
+          No decisions in the selected window. The ledger holds{' '}
           <Mono variant="monoCaption">{decisionPage.total.toLocaleString('en-IN')}</Mono> older
-          records — the tiles below measure a 24-hour window, so they read zero.
+          records — try a wider window above.
         </Alert>
       )}
 
@@ -205,6 +247,14 @@ const FleetOverview = () => {
                 decisions={decisions}
                 onSelect={(decision) => setSelected(decision.action_id)}
                 showShadow={shadowRunning}
+                serverCounts={decisionPage?.counts}
+                page={page}
+                pageSize={PAGE}
+                totalRows={decisionPage?.total ?? 0}
+                onPageChange={(nextPage, nextFilter) => {
+                  setPage(nextPage);
+                  if (nextFilter !== undefined) setVerdictFilter(nextFilter);
+                }}
               />
             </Box>
           </Paper>

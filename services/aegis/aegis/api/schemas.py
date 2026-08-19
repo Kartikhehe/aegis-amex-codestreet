@@ -226,6 +226,13 @@ class DecisionOut(ApiModel):
 class DecisionPage(ApiModel):
     items: list[DecisionOut]
     total: int
+    counts: dict[str, int] = Field(
+        default_factory=dict,
+        description=(
+            "True count per verdict across the whole filtered set, not just this "
+            "page. Counting from `items` would cap every figure at `limit`."
+        ),
+    )
     limit: int
     offset: int
 

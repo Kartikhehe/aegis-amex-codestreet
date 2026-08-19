@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Chip, Stack, Typography } from '@mui/material';
+import { Box, Button, Chip, Stack, Typography } from '@mui/material';
 import { formatCurrency, formatReason, formatScore, formatTime } from 'aegis/format';
 import {
   denyGlowSx,
@@ -174,16 +174,31 @@ const StreamRow = ({ decision, isNew, onSelect, showShadow }) => {
   );
 };
 
-const DecisionStream = ({ decisions = [], onSelect, showShadow = false, maxRows = 40 }) => {
+const DecisionStream = ({
+  decisions = [],
+  onSelect,
+  showShadow = false,
+  maxRows = 40,
+  // True counts across the whole filtered set, from the server. Without these
+  // the chips can only count the rows on screen, so a stream showing 60 of
+  // 8,267 claimed there were 60 decisions in total.
+  serverCounts = null,
+  // Paging, when the caller supports it.
+  page = 0,
+  pageSize = 0,
+  totalRows = 0,
+  onPageChange = null,
+}) => {
   const [filter, setFilter] = useState('ALL');
   const seen = useRef(new Set());
   const [newIds, setNewIds] = useState(new Set());
   const firstLoad = useRef(true);
 
   const filtered = useMemo(() => {
+    if (onPageChange) return decisions;
     const rows = filter === 'ALL' ? decisions : decisions.filter((d) => d.verdict === filter);
     return rows.slice(0, maxRows);
-  }, [decisions, filter, maxRows]);
+  }, [decisions, filter, maxRows, onPageChange]);
 
   // Track which rows are genuinely new so only they animate. On first load
   // everything is "new", which would be a wall of motion -- so the first batch
@@ -211,12 +226,24 @@ const DecisionStream = ({ decisions = [], onSelect, showShadow = false, maxRows 
   }, [decisions]);
 
   const counts = useMemo(() => {
+    // Prefer the server's totals; fall back to counting what is loaded when a
+    // caller has not supplied them.
+    if (serverCounts) {
+      const allow = serverCounts.ALLOW ?? 0;
+      const deny = serverCounts.DENY ?? 0;
+      const stepUp = serverCounts.STEP_UP ?? 0;
+      return { ALL: allow + deny + stepUp, ALLOW: allow, STEP_UP: stepUp, DENY: deny };
+    }
     const base = { ALL: decisions.length, ALLOW: 0, STEP_UP: 0, DENY: 0 };
     decisions.forEach((d) => {
       if (base[d.verdict] !== undefined) base[d.verdict] += 1;
     });
     return base;
-  }, [decisions]);
+  }, [decisions, serverCounts]);
+
+  // When the server pages for us it has already applied the verdict filter, so
+  // filtering again locally would hide rows that belong on the page.
+  const paged = Boolean(onPageChange);
 
   return (
     <Stack sx={{ height: '100%', minHeight: 0 }}>
@@ -240,7 +267,10 @@ const DecisionStream = ({ decisions = [], onSelect, showShadow = false, maxRows 
             clickable
             variant={filter === option.key ? 'filled' : 'soft'}
             color={filter === option.key ? 'primary' : 'neutral'}
-            onClick={() => setFilter(option.key)}
+            onClick={() => {
+              setFilter(option.key);
+              onPageChange?.(0, option.key);
+            }}
           />
         ))}
       </Stack>
@@ -305,6 +335,49 @@ const DecisionStream = ({ decisions = [], onSelect, showShadow = false, maxRows 
           </AnimatePresence>
         )}
       </Box>
+
+      {/* Pager. Only when the caller pages server-side, and only when there is
+          more than one page -- a lone "1 of 1" is noise. */}
+      {paged && totalRows > pageSize && (
+        <Stack
+          direction="row"
+          alignItems="center"
+          justifyContent="space-between"
+          spacing={1}
+          sx={(theme) => ({
+            px: { xs: 1.5, md: 2 },
+            py: 1,
+            borderTop: `1px solid ${theme.vars.palette.divider}`,
+            flexShrink: 0,
+          })}
+        >
+          <Typography variant="caption" sx={{ color: 'text.disabled' }}>
+            <Mono variant="monoCaption">
+              {(page * pageSize + 1).toLocaleString('en-IN')}–
+              {Math.min((page + 1) * pageSize, totalRows).toLocaleString('en-IN')}
+            </Mono>{' '}
+            of <Mono variant="monoCaption">{totalRows.toLocaleString('en-IN')}</Mono>
+          </Typography>
+          <Stack direction="row" spacing={0.5}>
+            <Button
+              size="small"
+              disabled={page === 0}
+              onClick={() => onPageChange(page - 1, filter)}
+              sx={{ color: 'text.secondary', minWidth: 0 }}
+            >
+              Newer
+            </Button>
+            <Button
+              size="small"
+              disabled={(page + 1) * pageSize >= totalRows}
+              onClick={() => onPageChange(page + 1, filter)}
+              sx={{ color: 'text.secondary', minWidth: 0 }}
+            >
+              Older
+            </Button>
+          </Stack>
+        </Stack>
+      )}
     </Stack>
   );
 };
