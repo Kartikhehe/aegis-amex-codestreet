@@ -41,7 +41,8 @@ from typing import Any, Callable, Optional
 
 from .compliance import screen as compliance_screen
 from .diligence import assess as assess_diligence
-from .conformance import detect_injection, ship_to_mismatch
+from .conformance import ship_to_mismatch
+from .injection import detect_action as detect_injection_verdict
 from .types import (
     ActionRequest,
     ConformanceResult,
@@ -81,10 +82,17 @@ class PolicyThresholds:
 
 # Rule identifiers, in evaluation order. Also the wire format for the editor.
 RULE_ORDER: tuple[str, ...] = (
+    # Order within the identity stage, from broadest to narrowest:
+    #   the whole fleet -> is this agent real -> its operator -> the agent
+    #   itself -> its behaviour -> its authority -> its delegation.
+    # Each step presupposes the one before it. Asking whether an agent has
+    # tripped a breaker before establishing that it is a registered agent at
+    # all is the wrong way round.
     "fleet_stop",
-    "agent_breaker",
+    "agent_registered",
     "operator_revoked",
     "agent_inactive",
+    "agent_breaker",
     "mandate_expired",
     "delegation_depth",
     "suspected_injection",
@@ -347,15 +355,32 @@ def evaluate(
         )
     miss("fleet_stop")
 
-    # -- 2. agent breaker ----------------------------------------------------
-    if ctx.agent.breaker_tripped:
+    # -- 2. agent registered -------------------------------------------------
+    #
+    # Is this a registered agent at all? Every later check presupposes it: a
+    # breaker, a status or a mandate only means something for an agent that
+    # exists in the registry.
+    #
+    # This was previously verified in the API layer, before the engine ran --
+    # correct behaviour, but invisible in the decision record, so the flow began
+    # by asking about breakers on an agent whose existence had never been shown.
+    # `ctx.identity_verified` carries the ACE Agent Registration result, and an
+    # identity we cannot verify is a denial rather than a pass.
+    if ctx.identity_verified is False:
         return win(
-            "agent_breaker",
+            "agent_registered",
             Verdict.DENY,
-            ReasonCode.AGENT_BREAKER_TRIPPED,
-            "Circuit breaker tripped for this agent",
+            ReasonCode.AGENT_NOT_REGISTERED,
+            f"{ctx.agent.agent_id} is not a registered agent",
         )
-    miss("agent_breaker")
+    if ctx.identity_verified is None:
+        return win(
+            "agent_registered",
+            Verdict.DENY,
+            ReasonCode.IDENTITY_UNVERIFIABLE,
+            "Agent registration could not be verified — failing closed",
+        )
+    miss("agent_registered")
 
     # -- 3. operator revoked -------------------------------------------------
     if ctx.operator_revoked:
@@ -376,6 +401,19 @@ def evaluate(
             f"Agent status is {ctx.agent.status.value}",
         )
     miss("agent_inactive")
+
+    # -- 4b. agent breaker ---------------------------------------------------
+    # After status, not before: a breaker is a statement about how a live agent
+    # has been BEHAVING, which only makes sense once it is established that the
+    # agent is registered, its operator is good, and it is active.
+    if ctx.agent.breaker_tripped:
+        return win(
+            "agent_breaker",
+            Verdict.DENY,
+            ReasonCode.AGENT_BREAKER_TRIPPED,
+            "Circuit breaker tripped for this agent",
+        )
+    miss("agent_breaker")
 
     # -- 5. mandate expired --------------------------------------------------
     if mandate.is_expired(ctx.now):
@@ -399,16 +437,23 @@ def evaluate(
         )
     miss("delegation_depth")
 
-    # -- 6b. suspected injection (deterministic, pre-model) ------------------
+    # -- 6b. suspected injection (two detectors, pre-conformance) ------------
+    #
     # Ranked above the attribute veto: a subverted agent is a graver finding
     # than one bad purchase, and the record should say which it was.
-    injection_hits = detect_injection(action)
-    if injection_hits:
+    #
+    # TWO detectors, merged asymmetrically (see engine/injection.py): the phrase
+    # list is deterministic and auditable, the classifier catches paraphrase the
+    # list cannot. The classifier may only ESCALATE -- it can never clear a
+    # phrase hit, and its absence degrades coverage rather than creating a
+    # bypass. The record names which detector fired.
+    injection = detect_injection_verdict(action)
+    if injection.detected:
         return win(
             "suspected_injection",
             Verdict.DENY,
             ReasonCode.SUSPECTED_INJECTION,
-            ", ".join(injection_hits),
+            injection.detail,
         )
     miss("suspected_injection")
 

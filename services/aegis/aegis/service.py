@@ -213,6 +213,25 @@ def build_context(
     now: Optional[datetime] = None,
 ) -> EvaluationContext:
     at = now or utcnow()
+
+    # ACE Agent Registration, through the provider seam. Resolved HERE rather
+    # than in the API layer so the answer lands on the decision record and
+    # appears in the flow -- previously the check ran before the engine and was
+    # invisible in the evidence.
+    #
+    # Three states, and the third is the important one: a registry we cannot
+    # reach yields None, which the engine treats as a denial. An identity we
+    # cannot verify is never a pass.
+    identity_verified: Optional[bool] = True
+    try:
+        from .providers import ProviderUnavailable, get_providers
+
+        identity_verified = get_providers(session).identity.verify(agent_row.agent_id) is not None
+    except ProviderUnavailable:
+        identity_verified = None
+    except Exception:  # noqa: BLE001
+        identity_verified = None
+
     agents = load_agent_map(session)
     chain = build_chain(agent_row.agent_id, agents)
     operator = session.get(Operator, agent_row.operator_id)
@@ -258,6 +277,7 @@ def build_context(
             amount_today=Decimal(str(velocity_row[1] or 0)),
         ),
         known_merchants=frozenset(known),
+        identity_verified=identity_verified,
         now=at,
     )
 

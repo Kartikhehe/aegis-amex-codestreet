@@ -58,6 +58,16 @@ class BreakerConfig:
     velocity_txn_multiplier: float = 3.0
     velocity_amount_multiplier: float = 4.0
 
+    absolute_txn_cap: int = 25
+    """Transactions in one window that trip velocity even with NO baseline.
+
+    The relative check needs a preceding window to spike against, so a new or
+    long-idle agent was previously unchecked. 25 in an hour is far above any
+    seeded mandate's daily limit (the highest is 12), so this only fires on
+    behaviour no legitimate agent produces -- it is a backstop, not the primary
+    signal.
+    """
+
     denial_rate_threshold: float = 0.40
 
     conformance_collapse_floor: float = 0.55
@@ -171,6 +181,37 @@ def evaluate_breakers(
         return events
 
     # --- velocity -----------------------------------------------------------
+    #
+    # Two paths, because the relative check has a blind spot.
+    #
+    # RELATIVE: recent activity against this agent's own preceding window. This
+    # is the good signal -- it compares an agent to itself, so a busy agent and
+    # a quiet one are judged on their own terms.
+    #
+    # ABSOLUTE: a fallback for when there IS no preceding window. A brand-new
+    # agent, or one idle for two hours, has no baseline to spike against, so
+    # `if prior:` skipped it entirely -- a compromised agent making its first
+    # forty purchases in an hour tripped nothing. The absolute cap is deliberately
+    # generous (a multiple of the mandate's own daily transaction limit) so it
+    # only catches behaviour no legitimate agent exhibits.
+    if not prior and cfg.absolute_txn_cap and len(recent) >= cfg.absolute_txn_cap:
+        emit(
+            BreakerType.VELOCITY,
+            Severity.WARNING,
+            "Velocity breaker tripped",
+            (
+                f"{len(recent)} transactions in the last {cfg.window_minutes} "
+                f"minutes with no prior activity to compare against — above the "
+                f"absolute cap of {cfg.absolute_txn_cap}."
+            ),
+            {
+                "recent_count": len(recent),
+                "prior_count": 0,
+                "absolute_cap": cfg.absolute_txn_cap,
+                "basis": "absolute — no baseline window available",
+            },
+        )
+
     if prior:
         prior_count = len(prior)
         prior_amount = sum((d.amount for d in prior), Decimal("0"))

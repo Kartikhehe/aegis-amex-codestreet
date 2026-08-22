@@ -432,16 +432,32 @@ def _detect_ship_to(text: str, allowed: tuple[str, ...]) -> str:
 
 
 def _detect_injection(text: str) -> str | None:
-    low = text.lower()
-    for hint in _INJECTION_HINTS:
-        if hint in low:
-            # Hand the engine the sentence that carried it, not just the hint,
-            # so the record keeps enough context to be read later as evidence.
-            for sentence in re.split(r"[.!?\n]", text):
-                if hint in sentence.lower():
-                    return sentence.strip()
-            return text.strip()
-    return None
+    """Decide whether this prompt carries manipulation worth ATTACHING.
+
+    This is the gate that decides whether text reaches the engine as evidence
+    at all -- so if it misses, the engine never gets to judge. That makes the
+    classifier important here and not only in the engine: a paraphrase the
+    phrase list does not cover would otherwise be silently dropped before any
+    rule could see it.
+
+    Both detectors run. The verdict is still the ENGINE's, and it re-runs its
+    own detection on whatever we attach -- this only controls what gets handed
+    over. Attaching benign text is harmless; failing to attach hostile text is
+    a bypass.
+    """
+    from .engine.injection import detect as detect_injection_text
+
+    verdict = detect_injection_text(text)
+    if not verdict.detected:
+        return None
+
+    # Hand over the sentence that carried it where we can identify one, so the
+    # record keeps enough context to be read later as evidence.
+    for hint in verdict.rules_hits:
+        for sentence in re.split(r"[.!?\n]", text):
+            if hint in sentence.lower():
+                return sentence.strip()
+    return text.strip()
 
 
 def _quantity_near(text: str, position: int) -> int:

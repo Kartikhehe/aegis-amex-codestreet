@@ -33,6 +33,11 @@ const RULE_INFO = {
     question: 'Is the whole fleet halted by an operator?',
     source: 'fleet_state row, read on every decision',
   },
+  agent_registered: {
+    passed: 'This is a registered agent, confirmed with the agent registry.',
+    question: 'Is this a registered agent at all?',
+    source: 'ACE Agent Registration, through the provider seam',
+  },
   agent_breaker: {
     passed: "This agent's circuit breaker is clear.",
     question: 'Has this agent tripped a circuit breaker?',
@@ -63,7 +68,9 @@ const RULE_INFO = {
   suspected_injection: {
     passed: 'No manipulation attempt found in the untrusted text.',
     question: 'Was the agent fed text trying to override its limits?',
-    source: 'deterministic phrase match on the untrusted text, pre-model',
+    source:
+      'two detectors: a deterministic phrase list plus an AI classifier. ' +
+      'The classifier can only escalate — it cannot clear a phrase hit.',
   },
   ship_to_mismatch: {
     passed: 'The goods are going to the address the card member authorised.',
@@ -177,11 +184,17 @@ const STAGES = [
     title: 'Identity',
     plane: 'Identity plane',
     caption: 'Is this agent real, live, and acting for someone?',
+    // Broadest to narrowest, and each step presupposes the one before it:
+    // the whole fleet, then whether this agent is real, then its operator,
+    // then the agent itself, then how it has been behaving, then its
+    // authority, then its delegation. Asking about a breaker before
+    // establishing the agent is registered is the wrong way round.
     rules: [
       'fleet_stop',
-      'agent_breaker',
+      'agent_registered',
       'operator_revoked',
       'agent_inactive',
+      'agent_breaker',
       'mandate_expired',
       'delegation_depth',
     ],

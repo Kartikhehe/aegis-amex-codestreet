@@ -106,6 +106,10 @@ class ReasonCode(str, Enum):
     different verdicts as policy thresholds move.
     """
 
+    # Identity -- is this a registered agent at all?
+    AGENT_NOT_REGISTERED = "agent_not_registered"
+    IDENTITY_UNVERIFIABLE = "identity_unverifiable"
+
     # Halt / lifecycle
     FLEET_EMERGENCY_STOP = "fleet_emergency_stop"
     AGENT_BREAKER_TRIPPED = "agent_breaker_tripped"
@@ -456,6 +460,18 @@ class EvaluationContext:
     operator_revoked: bool = False
     velocity: VelocityWindow = field(default_factory=VelocityWindow)
     known_merchants: frozenset[str] = frozenset()
+
+    identity_verified: Optional[bool] = True
+    """Did ACE Agent Registration confirm this agent is registered?
+
+    True  -- confirmed.
+    False -- the registry answered, and this agent is not registered.
+    None  -- the registry could not be reached. Fails CLOSED: an identity we
+             cannot verify is a denial, never a pass.
+
+    Defaults to True so replay, tests and shadow evaluation behave as before;
+    the live decision path sets it explicitly from the provider.
+    """
     """Merchants this agent has previously transacted with successfully."""
 
     now: datetime = field(default_factory=utcnow)
