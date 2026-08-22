@@ -106,9 +106,42 @@ def _reset(session: Session) -> None:
             )
         )
     else:
-        # Postgres: ALTER the trigger off, truncate, put it back. Seeding is the
-        # one legitimate reason to reset a ledger, and it happens before any
-        # real record exists.
+        # Seeding is a PRIVILEGED operation and Postgres treats it as one.
+        #
+        # The application role has UPDATE, DELETE and TRUNCATE revoked on the
+        # ledger, so this path fails for it -- correctly. That is the guarantee
+        # working, not a bug: if the seeder could clear the ledger using the
+        # app's own credentials, so could a compromised application.
+        #
+        # So say so plainly rather than papering over it. Run the seeder with a
+        # DATABASE_URL for the table owner (or a superuser); the SERVICE keeps
+        # running as the restricted role.
+        try:
+            session.execute(text("SELECT 1")).one()
+            owner = session.execute(
+                text("SELECT tableowner FROM pg_tables WHERE tablename = 'ledger'")
+            ).scalar()
+            current = session.execute(text("SELECT current_user")).scalar()
+            # A superuser can reset regardless of ownership or grants, so only
+            # complain when the connected role is neither.
+            superuser = session.execute(
+                text("SELECT usesuper FROM pg_user WHERE usename = current_user")
+            ).scalar()
+            if owner and current and owner != current and not superuser:
+                raise PermissionError(
+                    f"Seeding needs to reset the append-only ledger, which the "
+                    f"application role cannot do by design.\n"
+                    f"  current role : {current}\n"
+                    f"  table owner  : {owner}\n"
+                    f"Re-run with DATABASE_URL pointed at the owner, e.g.\n"
+                    f"  DATABASE_URL=postgresql+psycopg://{owner}@localhost:5432/aegis "
+                    f"python -m aegis.seed.run"
+                )
+        except PermissionError:
+            raise
+        except Exception:  # noqa: BLE001
+            pass  # not Postgres, or the probe is unavailable -- carry on
+
         session.execute(text("ALTER TABLE ledger DISABLE TRIGGER trg_ledger_append_only"))
         session.execute(text("ALTER TABLE ledger DISABLE TRIGGER trg_ledger_no_truncate"))
         session.execute(text("TRUNCATE TABLE ledger RESTART IDENTITY"))

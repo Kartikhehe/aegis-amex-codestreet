@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import {
+  Box,
   Button,
   Chip,
   Dialog,
@@ -14,6 +15,7 @@ import {
 } from '@mui/material';
 import ChainStrip from 'aegis/components/ChainStrip';
 import EmptyState from 'aegis/components/EmptyState';
+import LedgerChain from 'aegis/components/LedgerChain';
 import Mono from 'aegis/components/Mono';
 import PageHeader from 'aegis/components/PageHeader';
 import Term from 'aegis/components/Term';
@@ -274,6 +276,9 @@ const Incidents = () => {
               </Typography>
             </Stack>
             <ChainStrip result={verification} active={Boolean(verification)} />
+            <Box sx={{ mt: 2 }}>
+              <LedgerChain verification={verification} />
+            </Box>
           </Paper>
         </Grid>
 
