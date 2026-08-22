@@ -189,9 +189,14 @@ const STAGES = [
     // then the agent itself, then how it has been behaving, then its
     // authority, then its delegation. Asking about a breaker before
     // establishing the agent is registered is the wrong way round.
+    // `agent_registered` runs in the engine and is recorded on every decision,
+    // but is deliberately NOT listed here. It is an infrastructure
+    // precondition rather than a governance judgement, and showing it added a
+    // step that always passes -- noise ahead of the checks a reader is
+    // actually looking for. It stays in the record; it just does not need a
+    // node of its own.
     rules: [
       'fleet_stop',
-      'agent_registered',
       'operator_revoked',
       'agent_inactive',
       'agent_breaker',

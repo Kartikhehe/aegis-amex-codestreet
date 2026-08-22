@@ -68,6 +68,18 @@ const BasketPanel = ({ assistant, basket = [], total = 0, lastVerdict }) => {
                       </Box>
                     )}
                   </Typography>
+                  {/* Merchant-feed rating, understated. Shown so the basket
+                      says what the diligence check was measured against, not
+                      to advertise the check itself. */}
+                  {line.rating != null && (
+                    <Typography
+                      variant="caption"
+                      sx={{ color: 'text.disabled', display: 'block', mt: 0.25 }}
+                    >
+                      {line.rating}★
+                      {line.review_count ? ` · ${line.review_count.toLocaleString('en-IN')}` : ''}
+                    </Typography>
+                  )}
                   {line.attributes?.length > 0 && (
                     <Stack direction="row" spacing={0.5} sx={{ mt: 0.5, flexWrap: 'wrap', gap: 0.5 }}>
                       {line.attributes.map((attribute) => (

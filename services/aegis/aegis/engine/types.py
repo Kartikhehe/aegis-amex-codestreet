@@ -321,11 +321,23 @@ class CartItem:
     # never an independent benchmark -- the UI says so wherever it is used.
     list_price: Optional[Decimal] = None
 
+    # Merchant-supplied quality signals, mirroring the shape a product feed
+    # carries. Optional because most merchants will not send them -- diligence
+    # reports "unavailable" rather than inventing a number when they are absent.
+    #
+    # Amex is uniquely placed to require these at acquiring, since it is the
+    # acquirer as well as the issuer. They are treated as merchant assertions,
+    # never as independent verification, and the UI says so.
+    rating: Optional[float] = None
+    review_count: Optional[int] = None
+
     def to_canonical(self) -> dict[str, Any]:
         return {
             "label": self.label,
             "attributes": sorted(self.attributes),
             "list_price": self.list_price,
+            "rating": self.rating,
+            "review_count": self.review_count,
             "quantity": self.quantity,
             "unit_amount": self.unit_amount,
         }
@@ -460,6 +472,19 @@ class EvaluationContext:
     operator_revoked: bool = False
     velocity: VelocityWindow = field(default_factory=VelocityWindow)
     known_merchants: frozenset[str] = frozenset()
+
+    diligence_bar: Optional[dict[str, Any]] = None
+    """The card member's purchase standards: min_rating, min_reviews,
+    price_tolerance, require_diligence.
+
+    Carried on the CONTEXT rather than the Mandate on purpose. The mandate is
+    hashed and travels on every decision; adding a field to it would change
+    every mandate hash in the database and invalidate existing records. A
+    diligence bar is also a different kind of thing -- a standing member
+    preference they can change at will, not a signed authorisation.
+
+    None means the documented defaults apply.
+    """
 
     identity_verified: Optional[bool] = True
     """Did ACE Agent Registration confirm this agent is registered?

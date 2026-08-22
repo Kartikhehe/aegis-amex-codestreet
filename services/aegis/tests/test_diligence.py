@@ -17,10 +17,12 @@ from aegis.engine.diligence import (
 
 
 class _Item:
-    def __init__(self, label, unit_amount="0", list_price=None):
+    def __init__(self, label, unit_amount="0", list_price=None, rating=None, reviews=None):
         self.label = label
         self.unit_amount = Decimal(str(unit_amount))
         self.list_price = Decimal(str(list_price)) if list_price is not None else None
+        self.rating = rating
+        self.review_count = reviews
 
 
 class _Action:
@@ -31,9 +33,13 @@ class _Action:
 
 
 class _Mandate:
-    def __init__(self, require_diligence=False, price_tolerance=None):
+    def __init__(
+        self, require_diligence=False, price_tolerance=None, min_rating=None, min_reviews=None
+    ):
         self.require_diligence = require_diligence
         self.price_tolerance = price_tolerance
+        self.min_rating = min_rating
+        self.min_reviews = min_reviews
 
 
 def check(result, key):
@@ -130,10 +136,9 @@ class TestHonestyAboutMissingData:
         for designed in UNAVAILABLE_CHECKS:
             assert len(designed.basis) > 40, designed.key
 
-    def test_ratings_are_never_claimed(self):
-        quality = next(c for c in UNAVAILABLE_CHECKS if c.key == "quality_floor")
-        assert quality.status == "unavailable"
-        assert "deprecated" in quality.basis.lower() or "no " in quality.basis.lower()
+    def test_quality_floor_is_now_implemented_not_declared(self):
+        """It moved out of the unavailable list when the feed field was added."""
+        assert all(c.key != "quality_floor" for c in UNAVAILABLE_CHECKS)
 
     def test_dominated_purchase_is_declared_not_faked(self):
         dominated = next(c for c in UNAVAILABLE_CHECKS if c.key == "alternatives_foregone")
@@ -194,3 +199,84 @@ class TestSubstitutionDoesNotCryWolf:
     def test_a_named_item_present_passes(self):
         action = _Action([_Item("Black trolley bag", 1800)], "buy a black bag")
         assert check(assess(action, _Mandate()), "substitution_distance").status == "pass"
+
+
+class TestQualityFloor:
+    """Rating and review count against the bar the card member set."""
+
+    def test_a_well_rated_product_passes(self):
+        action = _Action([_Item("Trolley bag", 1800, rating=4.4, reviews=1820)], "buy a bag")
+        assert check(assess(action, _Mandate()), "quality_floor").status == "pass"
+
+    def test_a_poorly_rated_product_is_flagged(self):
+        """The 1.9-star bag: the case this check exists for."""
+        action = _Action([_Item("Trolley bag", 1800, rating=1.9, reviews=340)], "buy a bag")
+        result = assess(action, _Mandate())
+        assert check(result, "quality_floor").status == "flag"
+        assert "quality_floor" in result.flags
+
+    def test_too_few_reviews_is_unavailable_not_a_failure(self):
+        """Three glowing reviews are not evidence -- but not grounds to block."""
+        action = _Action([_Item("Trolley bag", 1800, rating=4.9, reviews=3)], "buy a bag")
+        result = assess(action, _Mandate())
+        assert check(result, "quality_floor").status == "unavailable"
+        assert "quality_floor" not in result.flags
+
+    def test_no_rating_supplied_is_unavailable(self):
+        action = _Action([_Item("Trolley bag", 1800)], "buy a bag")
+        assert check(assess(action, _Mandate()), "quality_floor").status == "unavailable"
+
+    def test_the_member_can_raise_the_bar(self):
+        action = _Action([_Item("Bag", 1800, rating=4.0, reviews=900)], "buy a bag")
+        assert check(assess(action, _Mandate()), "quality_floor").status == "pass"
+        strict = _Mandate(min_rating=Decimal("4.5"))
+        assert check(assess(action, strict), "quality_floor").status == "flag"
+
+    def test_the_member_can_raise_the_review_floor(self):
+        action = _Action([_Item("Bag", 1800, rating=4.6, reviews=40)], "buy a bag")
+        assert check(assess(action, _Mandate()), "quality_floor").status == "pass"
+        strict = _Mandate(min_reviews=100)
+        assert check(assess(action, strict), "quality_floor").status == "unavailable"
+
+    def test_the_worst_line_decides(self):
+        """One bad item in a basket is enough to flag the basket."""
+        action = _Action(
+            [
+                _Item("Good thing", 500, rating=4.8, reviews=5000),
+                _Item("Bad thing", 500, rating=1.4, reviews=200),
+            ],
+            "buy things",
+        )
+        assert check(assess(action, _Mandate()), "quality_floor").status == "flag"
+
+    def test_provenance_is_labelled_merchant_supplied(self):
+        """Ratings are a merchant assertion, and the UI must say so."""
+        action = _Action([_Item("Bag", 1800, rating=4.4, reviews=900)], "buy a bag")
+        basis = check(assess(action, _Mandate()), "quality_floor").basis
+        assert "merchant-supplied" in basis.lower()
+        assert "not independent" in basis.lower()
+
+    def test_ordinary_catalogue_quality_clears_the_default_bar(self):
+        """The feed values the simulator generates must not flag routine spend.
+
+        A diligence check that fires on normal purchases trains everyone to
+        ignore it, which is worse than not having it.
+        """
+        from aegis.storefront import BY_ID, _feed_quality
+
+        for shop in BY_ID.values():
+            for product in shop.products:
+                rating, reviews = _feed_quality(product.sku)
+                assert rating >= 3.5, f"{product.sku} rates {rating}"
+                assert reviews >= 20, f"{product.sku} has {reviews} reviews"
+
+
+class TestShortfallDetail:
+    def test_it_reads_as_a_sentence_not_a_key(self):
+        """This text reaches a card member, so "quality_floor" will not do."""
+        from aegis.engine.diligence import shortfall_detail
+
+        action = _Action([_Item("Trolley bag", 1800, rating=1.9, reviews=340)], "buy a bag")
+        detail = shortfall_detail(assess(action, _Mandate()))
+        assert "1.9" in detail and "3.5" in detail
+        assert "quality_floor" not in detail

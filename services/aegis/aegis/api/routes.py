@@ -211,6 +211,8 @@ def decide(
                 list_price=(
                     None if item.list_price is None else Decimal(str(item.list_price))
                 ),
+                rating=item.rating,
+                review_count=item.review_count,
             )
             for item in payload.cart_items
         ),
@@ -1642,6 +1644,8 @@ def simulate_checkout(
                     if line.get("list_price") is not None
                     else None
                 ),
+                rating=line.get("rating"),
+                review_count=line.get("review_count"),
             )
             for line in parsed.items
         ],
@@ -1678,6 +1682,13 @@ def simulate_checkout(
                 quantity=int(line["quantity"]),
                 unit_amount=Decimal(str(line["unit_amount"])),
                 attributes=list(line.get("attributes", [])),
+                list_price=(
+                    Decimal(str(line["list_price"]))
+                    if line.get("list_price") is not None
+                    else None
+                ),
+                rating=line.get("rating"),
+                review_count=line.get("review_count"),
             )
             for line in parsed.items
         ],
@@ -1979,3 +1990,74 @@ def verify_verdict(block: dict[str, Any]) -> dict[str, Any]:
             )
         ),
     }
+
+
+# --------------------------------------------------------------------------
+# Card member purchase standards -- the diligence bar
+#
+# Scoped to the signed-in member from their TOKEN, never from a path or body
+# field. A member can only ever read or change their own bar.
+# --------------------------------------------------------------------------
+
+
+def _standards_out(row, *, is_default: bool) -> s.PurchaseStandardsOut:
+    from ..engine.diligence import (
+        DEFAULT_MIN_RATING,
+        DEFAULT_MIN_REVIEWS,
+        DEFAULT_PRICE_TOLERANCE,
+    )
+
+    if row is None:
+        return s.PurchaseStandardsOut(
+            min_rating=DEFAULT_MIN_RATING,
+            min_reviews=DEFAULT_MIN_REVIEWS,
+            price_tolerance=DEFAULT_PRICE_TOLERANCE,
+            require_diligence=False,
+            is_default=True,
+        )
+    return s.PurchaseStandardsOut(
+        min_rating=Decimal(str(row.min_rating)),
+        min_reviews=int(row.min_reviews),
+        price_tolerance=Decimal(str(row.price_tolerance)),
+        require_diligence=bool(row.require_diligence),
+        is_default=is_default,
+    )
+
+
+@router.get("/me/purchase-standards", response_model=s.PurchaseStandardsOut, tags=["auth"])
+def get_purchase_standards(db: DbSession, principal: CurrentUser) -> s.PurchaseStandardsOut:
+    """The signed-in member's diligence bar, or the defaults if unset."""
+    from ..db.models import CardMemberPreferences
+
+    if not principal.card_member_id:
+        raise HTTPException(
+            status_code=403, detail="Purchase standards belong to a card member."
+        )
+    row = db.get(CardMemberPreferences, principal.card_member_id)
+    return _standards_out(row, is_default=row is None)
+
+
+@router.put("/me/purchase-standards", response_model=s.PurchaseStandardsOut, tags=["auth"])
+def save_purchase_standards(
+    payload: s.PurchaseStandardsIn, db: DbSession, principal: CurrentUser
+) -> s.PurchaseStandardsOut:
+    """Save the bar. Takes effect on the next decision -- no restart needed."""
+    from ..db.models import CardMemberPreferences
+
+    if not principal.card_member_id:
+        raise HTTPException(
+            status_code=403, detail="Purchase standards belong to a card member."
+        )
+
+    row = db.get(CardMemberPreferences, principal.card_member_id)
+    if row is None:
+        row = CardMemberPreferences(card_member_id=principal.card_member_id)
+        db.add(row)
+    row.min_rating = payload.min_rating
+    row.min_reviews = payload.min_reviews
+    row.price_tolerance = payload.price_tolerance
+    row.require_diligence = payload.require_diligence
+    row.updated_at = utcnow()
+    db.commit()
+    db.refresh(row)
+    return _standards_out(row, is_default=False)

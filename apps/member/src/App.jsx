@@ -19,6 +19,7 @@ import AgentAuthorityCard from "./components/AgentAuthorityCard";
 import Logo from "./components/Logo";
 import BlockedCard from "./components/BlockedCard";
 import CardSummary from "./components/CardSummary";
+import PurchaseStandards from "./components/PurchaseStandards";
 import StepUpCard from "./components/StepUpCard";
 import endpoints from "./aegis/api";
 
@@ -411,6 +412,10 @@ const App = () => {
                   onPause={() => togglePause(agent)}
                 />
               ))}
+              {/* The bar these agents are held to. Last, and collapsed: most
+                  members never change it, so it should not compete with the
+                  agents themselves. */}
+              <PurchaseStandards api={api} endpoints={endpoints} />
             </Stack>
           ))}
           </Box>

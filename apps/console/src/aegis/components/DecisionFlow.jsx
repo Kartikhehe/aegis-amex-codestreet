@@ -329,7 +329,7 @@ const Stage = ({ stage, index, expandedAll, isLast, onDrill }) => {
                     }}
                   >
                     <Typography variant="caption" sx={{ color: 'text.disabled' }}>
-                      {hidden} more check{hidden === 1 ? '' : 's'}, all passed — show
+                      {hidden} check{hidden === 1 ? '' : 's'}, all passed — show
                     </Typography>
                   </Box>
                 </Stack>

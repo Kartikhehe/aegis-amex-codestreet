@@ -88,6 +88,15 @@ class CartItemIn(ApiModel):
             "signal, not an independent benchmark."
         ),
     )
+    rating: Optional[float] = Field(
+        None,
+        ge=0,
+        le=5,
+        description="Merchant-supplied product rating from its feed, 0-5.",
+    )
+    review_count: Optional[int] = Field(
+        None, ge=0, description="Merchant-supplied review count from its feed."
+    )
 
 
 class DecideRequest(ApiModel):
@@ -569,6 +578,11 @@ class SimulatedCartLine(ApiModel):
     quantity: int
     unit_amount: Decimal
     attributes: list[str] = Field(default_factory=list)
+    # Merchant-feed signals, so the storefront can show what the diligence
+    # check was measured against rather than asserting a result.
+    list_price: Optional[Decimal] = None
+    rating: Optional[float] = None
+    review_count: Optional[int] = None
 
 
 class SimulateCheckoutResponse(ApiModel):
@@ -622,3 +636,38 @@ class BlockReportConfirmRequest(ApiModel):
             "or the metric could be moved by anyone who dislikes a decision."
         ),
     )
+
+
+# --------------------------------------------------------------------------
+# Card member purchase standards
+# --------------------------------------------------------------------------
+
+
+class PurchaseStandardsOut(ApiModel):
+    """The diligence bar, as the member app renders it."""
+
+    min_rating: Decimal
+    min_reviews: int
+    price_tolerance: Decimal
+    require_diligence: bool
+    is_default: bool = Field(
+        True,
+        description=(
+            "True when the member has never saved preferences and the "
+            "documented defaults are in force."
+        ),
+    )
+
+
+class PurchaseStandardsIn(ApiModel):
+    """What a member may change. Bounded so a saved bar is always usable.
+
+    The ranges are deliberate: a 5-star floor would flag almost every purchase,
+    and a zero-review floor would let three planted reviews clear the bar. Both
+    would make the control useless in opposite directions.
+    """
+
+    min_rating: Decimal = Field(..., ge=0, le=5)
+    min_reviews: int = Field(..., ge=0, le=1000)
+    price_tolerance: Decimal = Field(..., ge=0, le=2)
+    require_diligence: bool = False

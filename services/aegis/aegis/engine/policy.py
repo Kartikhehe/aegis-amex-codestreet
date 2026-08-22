@@ -41,6 +41,7 @@ from typing import Any, Callable, Optional
 
 from .compliance import screen as compliance_screen
 from .diligence import assess as assess_diligence
+from .diligence import shortfall_detail as diligence_detail
 from .conformance import ship_to_mismatch
 from .injection import detect_action as detect_injection_verdict
 from .types import (
@@ -606,10 +607,12 @@ def evaluate(
     #
     # `require_diligence` on the mandate decides which: absent, a shortfall is
     # allowed-and-flagged; set, it becomes a step-up the member answers.
-    diligence = assess_diligence(action, mandate)
+    # The bar is the card member's, carried on the context. `_BarView` lets
+    # assess() read either a mandate or a preferences dict through one shape.
+    diligence = assess_diligence(action, _bar_for(mandate, ctx.diligence_bar))
     if diligence.below_bar:
-        detail = ", ".join(diligence.flags)
-        if getattr(mandate, "require_diligence", False):
+        detail = diligence_detail(diligence)
+        if _bar_for(mandate, ctx.diligence_bar).require_diligence:
             return win(
                 "diligence_below_bar",
                 Verdict.STEP_UP,
@@ -628,6 +631,31 @@ def evaluate(
 
     # -- 15. allow -----------------------------------------------------------
     return win("allow", Verdict.ALLOW, ReasonCode.WITHIN_MANDATE, "Within mandate")
+
+
+class _BarView:
+    """The diligence bar as assess() expects to read it.
+
+    Member preferences win where present; the mandate supplies the rest. Keeps
+    assess() free of knowledge about where the numbers came from.
+    """
+
+    __slots__ = ("min_rating", "min_reviews", "price_tolerance", "require_diligence")
+
+    def __init__(self, mandate: Any, bar: Optional[dict[str, Any]]) -> None:
+        bar = bar or {}
+        self.min_rating = bar.get("min_rating")
+        self.min_reviews = bar.get("min_reviews")
+        self.price_tolerance = bar.get("price_tolerance") or getattr(
+            mandate, "price_tolerance", None
+        )
+        self.require_diligence = bool(
+            bar.get("require_diligence", getattr(mandate, "require_diligence", False))
+        )
+
+
+def _bar_for(mandate: Any, bar: Optional[dict[str, Any]]) -> _BarView:
+    return _BarView(mandate, bar)
 
 
 def _build(

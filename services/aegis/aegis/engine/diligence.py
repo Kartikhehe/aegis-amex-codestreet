@@ -89,6 +89,15 @@ from decimal import Decimal
 # How far above the merchant's own reference price we tolerate before flagging.
 DEFAULT_PRICE_TOLERANCE = Decimal("0.25")  # +25%
 
+# The default bar, applied when a card member has not set their own.
+#
+# Chosen to sit BELOW ordinary retail quality so it does not interrupt normal
+# spending: most catalogue items sit at 4.0-4.6 stars with hundreds of reviews,
+# so 3.5 flags the genuinely poor rather than the merely unexceptional. A bar
+# that fires on routine purchases teaches everyone to ignore it.
+DEFAULT_MIN_RATING = Decimal("3.5")
+DEFAULT_MIN_REVIEWS = 20
+
 # Words that carry no distinguishing meaning when comparing a request to a
 # basket. Without this, "buy me a black bag" matches almost anything.
 _STOPWORDS = frozenset(
@@ -300,6 +309,76 @@ def _substitution_distance(action) -> DiligenceCheck:
     )
 
 
+def _quality_floor(action, min_rating: Decimal, min_reviews: int) -> DiligenceCheck:
+    """Rating and review count against the bar the card member set.
+
+    The data is a MERCHANT ASSERTION from its product feed, exactly like
+    `list_price` -- and labelled that way, because it is not independent
+    verification. Amex can require it at acquiring, being the acquirer as well
+    as the issuer; nothing in ACP, AP2 or the ACE kit carries it today.
+
+    A rating with too few reviews is treated as no rating at all rather than a
+    failure. Three glowing reviews are not evidence, but they are also not
+    grounds to block a purchase.
+    """
+    basis = (
+        "merchant-supplied product feed. A merchant assertion, not independent "
+        "verification -- the same standing as the reference price."
+    )
+
+    rated = [
+        item
+        for item in (getattr(action, "cart_items", ()) or ())
+        if getattr(item, "rating", None) is not None
+    ]
+    if not rated:
+        return DiligenceCheck(
+            key="quality_floor",
+            label="Rating and reviews",
+            status="unavailable",
+            detail="This merchant did not supply ratings for these items.",
+            basis=basis,
+        )
+
+    worst = min(rated, key=lambda i: float(i.rating))
+    rating = Decimal(str(worst.rating))
+    reviews = int(getattr(worst, "review_count", 0) or 0)
+
+    # Too few reviews: the rating is not yet meaningful either way.
+    if reviews < min_reviews:
+        return DiligenceCheck(
+            key="quality_floor",
+            label="Rating and reviews",
+            status="unavailable",
+            detail=(
+                f"“{worst.label}” has only {reviews} review"
+                f"{'' if reviews == 1 else 's'} — too few to judge against "
+                f"your {min_reviews}-review floor."
+            ),
+            basis=basis,
+        )
+
+    if rating < min_rating:
+        return DiligenceCheck(
+            key="quality_floor",
+            label="Rating and reviews",
+            status="flag",
+            detail=(
+                f"“{worst.label}” is rated {rating}★ from {reviews:,} reviews, "
+                f"below the {min_rating}★ you asked for."
+            ),
+            basis=basis,
+        )
+
+    return DiligenceCheck(
+        key="quality_floor",
+        label="Rating and reviews",
+        status="pass",
+        detail=f"{rating}★ from {reviews:,} reviews.",
+        basis=basis,
+    )
+
+
 def _seller_disclosure(action) -> DiligenceCheck:
     """A marketplace order should name its seller."""
     basis = (
@@ -329,19 +408,6 @@ def _seller_disclosure(action) -> DiligenceCheck:
 # someone else.
 UNAVAILABLE_CHECKS: tuple[DiligenceCheck, ...] = (
     DiligenceCheck(
-        key="quality_floor",
-        label="Rating and review floor",
-        status="unavailable",
-        detail="Would catch the 1.9★ bag with 8 reviews.",
-        basis=(
-            "No agentic-commerce protocol carries ratings or review counts "
-            "(ACP, AP2, Amex ACE all lack them). Amazon's Product Advertising "
-            "API is deprecated; its successor is restricted to affiliate "
-            "publishers. Google's review API covers only a merchant's own "
-            "catalogue."
-        ),
-    ),
-    DiligenceCheck(
         key="seller_standing",
         label="Seller standing",
         status="unavailable",
@@ -363,14 +429,33 @@ UNAVAILABLE_CHECKS: tuple[DiligenceCheck, ...] = (
 
 
 def assess(action, mandate) -> DiligenceResult:
-    """Run every diligence component that has data, and declare those that do not."""
+    """Run every diligence component that has data, and declare those that do not.
+
+    The bar comes from the card member's own preferences, carried on the mandate
+    by the decision path. Absent preferences fall back to the documented
+    defaults, so a member who never opens the panel still gets a sensible bar.
+    """
     tolerance = getattr(mandate, "price_tolerance", None) or DEFAULT_PRICE_TOLERANCE
+    min_rating = getattr(mandate, "min_rating", None) or DEFAULT_MIN_RATING
+    min_reviews = getattr(mandate, "min_reviews", None) or DEFAULT_MIN_REVIEWS
 
     checks = [
         _substitution_distance(action),
+        _quality_floor(action, Decimal(str(min_rating)), int(min_reviews)),
         _price_sanity(action, Decimal(str(tolerance))),
         _seller_disclosure(action),
         *UNAVAILABLE_CHECKS,
     ]
     flags = tuple(c.key for c in checks if c.status == "flag")
     return DiligenceResult(checks=tuple(checks), flags=flags)
+
+
+def shortfall_detail(result: DiligenceResult) -> str:
+    """Why the bar was missed, in words.
+
+    The rule's detail lands on the ledger and in front of a card member, so a
+    bare key like "quality_floor" is not good enough -- it names the check
+    rather than the finding.
+    """
+    reasons = [c.detail for c in result.checks if c.status == "flag" and c.detail]
+    return " ".join(reasons) if reasons else ", ".join(result.flags)

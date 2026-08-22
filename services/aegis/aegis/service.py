@@ -66,6 +66,28 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+def _diligence_bar(session: Session, card_member_id: Optional[str]) -> Optional[dict]:
+    """The card member's purchase standards, or None for the defaults.
+
+    One indexed read by primary key. Absent row means the member never opened
+    the panel, and the documented defaults apply -- so the check works for
+    everyone without requiring anyone to configure it first.
+    """
+    if not card_member_id:
+        return None
+    from .db.models import CardMemberPreferences
+
+    row = session.get(CardMemberPreferences, card_member_id)
+    if row is None:
+        return None
+    return {
+        "min_rating": Decimal(str(row.min_rating)),
+        "min_reviews": int(row.min_reviews),
+        "price_tolerance": Decimal(str(row.price_tolerance)),
+        "require_diligence": bool(row.require_diligence),
+    }
+
+
 def mandate_from_row(row: AgentRow) -> Mandate:
     return Mandate(
         purpose=row.purpose,
@@ -278,6 +300,7 @@ def build_context(
         ),
         known_merchants=frozenset(known),
         identity_verified=identity_verified,
+        diligence_bar=_diligence_bar(session, agent_row.card_member_id),
         now=at,
     )
 

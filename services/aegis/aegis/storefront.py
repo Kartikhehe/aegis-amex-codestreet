@@ -106,6 +106,26 @@ def _d(value: str) -> Decimal:
     return Decimal(value)
 
 
+def _feed_quality(sku: str) -> tuple[float, int]:
+    """Stand-in merchant-feed rating and review count for a catalogue product.
+
+    Derived deterministically from the SKU, so the same product always carries
+    the same numbers -- a rating that changed between runs would make diligence
+    results irreproducible, which is the opposite of what this system is for.
+
+    Values land in ordinary retail territory (4.0-4.7 stars, hundreds to a few
+    thousand reviews) so routine purchases clear the default bar. Diligence is
+    advisory: a check that fired on normal spending would train everyone to
+    ignore it.
+    """
+    from .engine.types import sha256_hex
+
+    digest = sha256_hex(sku)
+    rating = 4.0 + (int(digest[:2], 16) % 8) / 10.0          # 4.0 - 4.7
+    reviews = 180 + int(digest[2:5], 16) % 3200               # 180 - 3,379
+    return round(rating, 1), reviews
+
+
 STOREFRONTS: tuple[Storefront, ...] = (
     # --- supermarket, MCC 5411 -------------------------------------------
     # The trap pair lives here. This shop and the gift-card counter below
@@ -528,12 +548,15 @@ def parse_with_rules(prompt: str, shop: Storefront) -> ParsedCart:
 
         if product.sku in chosen:
             continue
+        rating, reviews = _feed_quality(product.sku)
         chosen[product.sku] = {
             "label": product.label,
             "quantity": _quantity_near(prompt, start),
             "unit_amount": str(product.unit_amount),
             "attributes": list(product.attributes),
             "list_price": None if product.list_price is None else str(product.list_price),
+            "rating": rating,
+            "review_count": reviews,
         }
 
     cart.items = list(chosen.values())
@@ -592,8 +615,16 @@ _LLM_SCHEMA = {
                     "label": {"type": "string"},
                     "unit_amount": {"type": "number"},
                     "quantity": {"type": "integer"},
+                    "rating": {
+                        "type": "number",
+                        "description": "Merchant-feed product rating, 0-5. Typical retail is 4.0-4.7.",
+                    },
+                    "review_count": {
+                        "type": "integer",
+                        "description": "Merchant-feed review count. Established products have hundreds to thousands.",
+                    },
                 },
-                "required": ["sku", "label", "unit_amount", "quantity"],
+                "required": ["sku", "label", "unit_amount", "quantity", "rating", "review_count"],
             },
         },
         "ship_to": {"type": "string"},
@@ -696,6 +727,12 @@ def parse_with_llm(prompt: str, shop: Storefront) -> ParsedCart | None:
                         "onboard food. Only set sold_here=false when the "
                         "request is genuinely unrelated to the business -- a "
                         "petrol station does not sell air tickets.\n"
+                        "- Supply `rating` and `review_count` as a merchant "
+                        "product feed would. Use REALISTIC RETAIL VALUES: "
+                        "established products sit at 4.0-4.7 stars with several "
+                        "hundred to several thousand reviews. Only go below 3.5 "
+                        "if the shopper explicitly asked for something cheap, "
+                        "off-brand, or from an unknown seller.\n"
                         "- ship_to must be one of: "
                         + ", ".join(shop.ship_to_options)
                     ),
@@ -733,8 +770,9 @@ def parse_with_llm(prompt: str, shop: Storefront) -> ParsedCart | None:
         quantity = max(1, min(int(entry.get("quantity", 1) or 1), 99))
 
         if product is not None:
-            # Catalogue item: our price, our attributes. The model chose it,
-            # it did not describe it.
+            # Catalogue item: our price, our attributes, our feed quality. The
+            # model chose the product; it did not get to describe it.
+            rating, reviews = _feed_quality(product.sku)
             items.append(
                 {
                     "label": product.label,
@@ -744,6 +782,8 @@ def parse_with_llm(prompt: str, shop: Storefront) -> ParsedCart | None:
                     "list_price": (
                         None if product.list_price is None else str(product.list_price)
                     ),
+                    "rating": rating,
+                    "review_count": reviews,
                 }
             )
             continue
@@ -759,6 +799,17 @@ def parse_with_llm(prompt: str, shop: Storefront) -> ParsedCart | None:
         # though the shopper had asked for it.
         if unit <= 0 or unit > _MAX_MODEL_UNIT_PRICE:
             continue
+        # Rating and reviews come from the model here, since the product is not
+        # in our catalogue -- bounded to sane ranges so a malformed number
+        # cannot produce a nonsense diligence result.
+        try:
+            rating = max(0.0, min(float(entry.get("rating") or 4.3), 5.0))
+        except (TypeError, ValueError):
+            rating = 4.3
+        try:
+            reviews = max(0, min(int(entry.get("review_count") or 400), 500000))
+        except (TypeError, ValueError):
+            reviews = 400
         items.append(
             {
                 "label": label,
@@ -766,6 +817,8 @@ def parse_with_llm(prompt: str, shop: Storefront) -> ParsedCart | None:
                 # Attributes are OURS, derived from the label. Never the model's.
                 "attributes": _classify_attributes(label, shop),
                 "unit_amount": str(unit),
+                "rating": round(rating, 1),
+                "review_count": reviews,
             }
         )
 

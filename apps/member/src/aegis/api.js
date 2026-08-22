@@ -23,6 +23,7 @@ export const endpoints = {
   decision: (actionId) => `/decisions/${actionId}`,
   resolveStepUp: (actionId) => `/decisions/${actionId}/resolve`,
   blockReport: (actionId) => `/decisions/${actionId}/block-report`,
+  purchaseStandards: '/me/purchase-standards',
 
   // agents
   agents: '/agents',

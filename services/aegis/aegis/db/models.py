@@ -100,6 +100,39 @@ class AgentRow(Base):
     )
 
 
+class CardMemberPreferences(Base):
+    """A card member's purchase standards -- their diligence bar.
+
+    Kept on the MEMBER, not the agent. A bar is a statement about how carefully
+    the member wants things bought on their card, so it applies to every agent
+    they authorise rather than being re-entered per agent. Mandate ceilings are
+    per-agent because scope differs by job; a quality floor does not.
+
+    Absent row means the documented defaults apply, so a member who never opens
+    the panel still gets a sensible bar.
+    """
+
+    __tablename__ = "card_member_preferences"
+
+    card_member_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+
+    min_rating: Mapped[float] = mapped_column(Numeric(3, 2), default=3.5)
+    """Minimum acceptable product rating, 0-5."""
+
+    min_reviews: Mapped[int] = mapped_column(Integer, default=20)
+    """Minimum review count before a rating is treated as meaningful."""
+
+    price_tolerance: Mapped[float] = mapped_column(Numeric(4, 3), default=0.25)
+    """How far above the merchant's reference price is acceptable, as a fraction."""
+
+    require_diligence: Mapped[bool] = mapped_column(Boolean, default=False)
+    """When true, a shortfall becomes a STEP_UP the member answers rather than
+    an allowed-and-flagged purchase. Off by default: diligence is advisory, and
+    a member has to opt in to being interrupted by it."""
+
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class DecisionRow(Base):
     """Queryable projection of a decision.
 
