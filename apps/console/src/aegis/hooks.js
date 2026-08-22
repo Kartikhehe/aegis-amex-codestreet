@@ -103,8 +103,14 @@ export const useCanIssue = (agentId, mandate, enabled = false) =>
 export const useVerify = (range = {}, config) =>
   useSWR([endpoints.verify, { params: range }], axiosFetcher, { ...STATIC, ...config });
 
-export const useLedger = (params = {}, config) =>
-  useSWR([endpoints.ledger, { params }], axiosFetcher, { ...STATIC, ...config });
+// `enabled` is a null key rather than SWR's `isPaused`, because isPaused only
+// suppresses revalidation -- it does not start a fetch when it flips back to
+// false, so a lazily-opened panel would render forever empty.
+export const useLedger = (params = {}, { enabled = true, ...config } = {}) =>
+  useSWR(enabled ? [endpoints.ledger, { params }] : null, axiosFetcher, {
+    ...STATIC,
+    ...config,
+  });
 
 // ---------------------------------------------------------------------------
 // Policy

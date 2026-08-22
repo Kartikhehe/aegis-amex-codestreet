@@ -39,10 +39,7 @@ const LedgerChain = ({ verification }) => {
   const [page, setPage] = useState(0);
 
   // Don't fetch records until someone actually opens the panel.
-  const { data, isLoading } = useLedger(
-    { limit: PAGE, offset: page * PAGE },
-    { isPaused: () => !open },
-  );
+  const { data, isLoading } = useLedger({ limit: PAGE, offset: page * PAGE }, { enabled: open });
 
   const rows = data?.items ?? [];
   const total = data?.total ?? 0;
