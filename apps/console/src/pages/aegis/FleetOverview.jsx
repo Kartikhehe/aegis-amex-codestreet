@@ -134,6 +134,16 @@ const FleetOverview = () => {
   const ledgerHasHistory = (decisionPage?.total ?? 0) > 0;
   const staleWindow = windowEmpty && ledgerHasHistory;
 
+  // The tile window ends at the newest DECISION, not at the wall clock, so
+  // these numbers hold still instead of drifting as time passes. The trade is
+  // that "last 24 hours" can mean a 24-hour span that ended a while ago, and
+  // a dashboard must never let that pass silently -- a quiet period and a
+  // stale corpus look identical otherwise, and only one of them is a fact
+  // about the fleet.
+  const dataAsOf = overview?.data_as_of ? new Date(overview.data_as_of) : null;
+  const dataAgeHours = dataAsOf ? (Date.now() - dataAsOf.getTime()) / 36e5 : 0;
+  const dataIsOld = dataAsOf && dataAgeHours > 2;
+
   return (
     <>
       <PageHeader
@@ -180,6 +190,15 @@ const FleetOverview = () => {
           No decisions in the selected window. The ledger holds{' '}
           <Mono variant="monoCaption">{decisionPage.total.toLocaleString('en-IN')}</Mono> older
           records — try a wider window above.
+        </Alert>
+      )}
+
+      {!staleWindow && dataIsOld && (
+        <Alert severity="info" variant="outlined" sx={{ mb: { xs: 2, md: 3 } }}>
+          These figures cover the {tileHours} hours up to the most recent decision,{' '}
+          <Mono variant="monoCaption">{formatRelative(overview.data_as_of)}</Mono>. The window ends
+          at the newest decision rather than at the current time, so the numbers stay put instead of
+          drifting as the corpus ages.
         </Alert>
       )}
 

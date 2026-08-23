@@ -725,6 +725,7 @@ def seed(
 
         member_rng = random.Random(dist.RANDOM_SEED + 3)
         step_ups_resolved = 0
+        block_reports = 0
 
         for position, (action, kind, corpus) in enumerate(actions):
             try:
@@ -769,6 +770,35 @@ def seed(
                     # Flush so the NEXT decision's context sees this resolution
                     # -- that is what lets a merchant graduate from novel.
                     session.flush()
+
+            # Members push back on denials they think were wrong, and an
+            # operator reviews the pushback. This is the only false-block
+            # signal that exists for traffic without a ground-truth label, so a
+            # corpus with none of it leaves the metric reading a flat zero and
+            # the whole review workflow untestable.
+            #
+            # Deliberately two-sided: `block_report` is what the member said,
+            # `block_report_confirmed` is what the operator found. Leaving some
+            # confirmations at None models a review queue that is not empty.
+            elif decision.verdict.value == "DENY":
+                report_rate = dist.BLOCK_REPORT_RATE.get(
+                    decision.reason_code.value, dist.BLOCK_REPORT_DEFAULT_RATE
+                )
+                if member_rng.random() < report_rate:
+                    row = session.get(DecisionRow, action.action_id)
+                    if row is not None:
+                        row.block_report = "wrong"
+                        row.block_report_at = action.requested_at + timedelta(
+                            minutes=member_rng.randint(2, 240)
+                        )
+                        roll = member_rng.random()
+                        if roll < dist.BLOCK_REPORT_PENDING_RATE:
+                            row.block_report_confirmed = None  # still in the queue
+                        else:
+                            row.block_report_confirmed = (
+                                member_rng.random() < dist.BLOCK_REPORT_UPHELD_RATE
+                            )
+                        block_reports += 1
 
             if written % 500 == 0:
                 session.commit()
@@ -842,6 +872,7 @@ def seed(
             "actions_planned": len(actions),
             "decisions_written": written,
             "step_ups_resolved": step_ups_resolved,
+            "block_reports": block_reports,
             "verdicts": counts,
             "reason_codes": dict(sorted(reason_counts.items(), key=lambda kv: -kv[1])),
             "distinct_scorer_inputs": len(cache),

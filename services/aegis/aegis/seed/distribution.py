@@ -549,6 +549,67 @@ STEP_UP_APPROVAL_RATES: dict[str, float] = {
     "scorer_unavailable_fail_closed": 0.65,  # we couldn't check; usually fine
 }
 
+# ---------------------------------------------------------------------------
+# Block reports -- the real-traffic false-block signal
+# ---------------------------------------------------------------------------
+#
+# When AEGIS denies an action, the card member can say the block was wrong.
+# That report is the only honest false-block signal for traffic with no
+# ground-truth label, and it deliberately takes TWO people: the member reports
+# it, an operator confirms it. One person must not be able to move a published
+# metric on their own.
+#
+# These rates decide how much of that appears in a seeded corpus. They are
+# small on purpose. A denial that a member disputes AND an operator upholds is
+# a genuine mistake by the system, so the honest number here is low -- a
+# dashboard showing a 20% false-block rate would be advertising a broken engine,
+# not a working one.
+
+BLOCK_REPORT_RATE: dict[str, float] = {
+    # How often a member disputes a denial, keyed by why we denied it. People
+    # push back hardest where the denial looks arbitrary from THEIR side, and
+    # barely at all where the engine caught something they agree is wrong.
+    #
+    # Note which reasons actually reach DENY. Amount and velocity breaches
+    # resolve as STEP_UPs -- the member is asked rather than refused -- so the
+    # denial mix is dominated by the categories where a stop is usually
+    # correct. That is why the confirmed false-block rate lands near 1% and not
+    # near 10%: on this corpus, most denials genuinely deserved to be denials.
+    "ship_to_mismatch": 0.34,              # the most disputable stop we make:
+                                           # a real purchase to a new address
+                                           # looks identical to a diverted one
+    "amount_above_ceiling": 0.30,          # "I meant to spend that much"
+    "velocity_limit": 0.22,                # "it was a busy day, all mine"
+    "novel_merchant": 0.18,
+    "conformance_below_deny_floor": 0.12,  # sometimes a fair stop, sometimes a
+                                           # scorer that misread the purpose
+    "prohibited_attribute_veto": 0.04,     # rarely disputed: the member set
+                                           # the prohibition themselves
+    "suspected_injection": 0.01,           # essentially never: the evidence is
+                                           # in the injected text
+}
+
+BLOCK_REPORT_DEFAULT_RATE = 0.10
+"""Dispute rate for denial reasons not listed above."""
+
+BLOCK_REPORT_UPHELD_RATE = 0.34
+"""Share of disputes an operator confirms as a genuine false block.
+
+The rest are reviewed and rejected -- the block was correct and the member was
+mistaken about it, which is the common case. A third being upheld keeps the
+confirmed rate near 1-2% of denials, which is the range a payments risk team
+would recognise.
+"""
+
+BLOCK_REPORT_PENDING_RATE = 0.25
+"""Share of disputes still awaiting review when the corpus is generated.
+
+A real queue is never empty. Keeping some unreviewed is what makes the
+"awaiting review" figure on the dashboard meaningful rather than decorative --
+and it stops the confirmed rate being quietly inflated by a backlog nobody has
+looked at yet.
+"""
+
 TOTAL_ACTIONS = 8_000
 """Size of the MAIN corpus.
 

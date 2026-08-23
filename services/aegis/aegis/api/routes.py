@@ -1135,8 +1135,33 @@ def fleet_rearm(db: DbSession, principal: CurrentUser) -> s.RearmResponse:
 
 @router.get("/overview", response_model=s.OverviewResponse, tags=["fleet"])
 def overview(db: DbSession, principal: CurrentUser, hours: int = Query(24, ge=1, le=720)):
-    since = utcnow() - timedelta(hours=hours)
-    base = select(DecisionRow).where(DecisionRow.decided_at >= since)
+    # The window ends at the newest decision, NOT at the wall clock.
+    #
+    # Anchoring to `utcnow()` made every tile drift on its own, and it took
+    # three dismissed bug reports to find out why. The corpus spans a fixed
+    # period ending whenever the seed last ran, so a wall-clock window slides
+    # off it as real time passes: once the newest seeded decision aged past 24
+    # hours, the default view contained only ad-hoc demo traffic -- 39 rows,
+    # heavily weighted to denials because that is what one exercises by hand.
+    # It reported a 28% block rate against a true corpus rate of 2.9%, and
+    # moved by whole percentage points every few hours as single rows fell out.
+    #
+    # Anchoring to the data makes "last 24 hours" mean the last 24 hours OF
+    # DECISIONS. The numbers are then a property of the dataset rather than of
+    # when you happened to look, so they hold still without anything having to
+    # top the corpus up in the background. `data_as_of` is returned so the UI
+    # can say plainly when the newest decision is not recent.
+    scope = select(func.max(DecisionRow.decided_at))
+    if principal.role == Role.AGENT_OPERATOR:
+        scope = scope.where(DecisionRow.operator_id == principal.operator_id)
+    newest = db.scalar(scope)
+
+    anchor = newest or utcnow()
+    if anchor.tzinfo is None:
+        anchor = anchor.replace(tzinfo=timezone.utc)
+    since = anchor - timedelta(hours=hours)
+
+    base = select(DecisionRow).where(DecisionRow.decided_at >= _as_naive_utc(since))
     if principal.role == Role.AGENT_OPERATOR:
         base = base.where(DecisionRow.operator_id == principal.operator_id)
 
@@ -1287,6 +1312,8 @@ def overview(db: DbSession, principal: CurrentUser, hours: int = Query(24, ge=1,
         step_up_approval_rate=round(step_up_approval_rate, 4),
         policy_stage=stage,
         ruleset_hash=rs.ruleset_hash,
+        data_as_of=newest,
+        window_start=since,
     )
 
 

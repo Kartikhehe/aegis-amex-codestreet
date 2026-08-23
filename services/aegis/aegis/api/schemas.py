@@ -530,6 +530,16 @@ class OverviewResponse(ApiModel):
     policy_stage: str = "enforcing"
     ruleset_hash: str = ""
 
+    # The window ends at the newest decision rather than at the wall clock, so
+    # these two say which span was actually measured. Without them a reader has
+    # no way to tell a quiet period from a stale corpus -- and the difference
+    # matters, because one is a fact about the fleet and the other is a fact
+    # about when the data was last generated.
+    data_as_of: Optional[datetime] = None
+    """Timestamp of the newest decision in scope; the window's upper bound."""
+    window_start: Optional[datetime] = None
+    """Lower bound of the measured window."""
+
 
 # ---------------------------------------------------------------------------
 # Step-up resolution (card member)
