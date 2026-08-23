@@ -51,9 +51,8 @@ const SUGGESTIONS = {
     'a gift card for 2500',
   ],
   travel: [
-    'book a domestic economy fare',
+    'book a domestic economy fare from kanpur to chennai for 2 adults tomorrow',
     'two nights in a deluxe room',
-    'a coffee and a sandwich',
   ],
   fuel: ['fill 30 litres of petrol', 'diesel for 2000 and a car wash'],
   office: ['5 reams of A4 paper', 'a business laptop'],
