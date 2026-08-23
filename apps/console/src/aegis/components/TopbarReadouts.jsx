@@ -90,7 +90,21 @@ const TopbarReadouts = () => {
   const stage = shadowPolicy ? 'shadow' : (data?.policy_stage ?? 'enforcing');
 
   const blockRate = data?.block_rate ?? 0;
-  const falseBlockRate = data?.false_block_rate ?? 0;
+
+  // Two false-block measures exist and they answer the same question from
+  // different evidence: `false_block_rate` is exact but only defined for
+  // traffic carrying a ground-truth label, while `reported_false_block_rate`
+  // counts blocks a member disputed AND an operator upheld.
+  //
+  // Show whichever one actually has evidence behind it, preferring the exact
+  // measure. Reading only the labelled rate meant the tile sat at 0.00% while
+  // five confirmed member reports were on file -- the strictly true number,
+  // and a misleading one, because it silently answered a narrower question
+  // than the label implied.
+  const labelledRate = data?.false_block_rate ?? 0;
+  const reportedRate = data?.reported_false_block_rate ?? 0;
+  const usingReports = labelledRate === 0 && reportedRate > 0;
+  const falseBlockRate = usingReports ? reportedRate : labelledRate;
 
   return (
     <Stack
@@ -117,7 +131,7 @@ const TopbarReadouts = () => {
         tone={blockRate > 0.35 ? 'warning' : 'default'}
       />
       <Readout
-        label="False block"
+        label={usingReports ? 'False block (reported)' : 'False block'}
         value={formatRate(falseBlockRate)}
         term="false_block"
         tone={falseBlockRate > 0.15 ? 'warning' : 'default'}

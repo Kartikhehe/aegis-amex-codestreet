@@ -37,9 +37,9 @@ const TILE_TONES = { blocked: 'danger', step_up: 'warning' };
 // aggregates in memory -- a wider window would scan the whole ledger on every
 // 5-second poll.
 const TILE_WINDOWS = [
-  { hours: 24, label: '24h' },
-  { hours: 24 * 7, label: '7d' },
-  { hours: 24 * 30, label: '30d' },
+  { hours: 24, label: '24h', caption: 'last 24 hours' },
+  { hours: 24 * 7, label: '7d', caption: 'last 7 days' },
+  { hours: 24 * 30, label: '30d', caption: 'last 30 days' },
 ];
 
 const BreakerRow = ({ incident }) => (
@@ -140,6 +140,11 @@ const FleetOverview = () => {
   // a dashboard must never let that pass silently -- a quiet period and a
   // stale corpus look identical otherwise, and only one of them is a fact
   // about the fleet.
+  // One phrase for the selected window, so every caption on the page agrees
+  // with the buttons above them.
+  const windowLabel =
+    TILE_WINDOWS.find((option) => option.hours === tileHours)?.caption ?? `last ${tileHours} hours`;
+
   const dataAsOf = overview?.data_as_of ? new Date(overview.data_as_of) : null;
   const dataAgeHours = dataAsOf ? (Date.now() - dataAsOf.getTime()) / 36e5 : 0;
   const dataIsOld = dataAsOf && dataAgeHours > 2;
@@ -327,6 +332,57 @@ const FleetOverview = () => {
             ) : (
               <BlockRateChart series={overview.block_rate_series} />
             )}
+
+            {/* Where the false-block number comes from, for real traffic.
+                The chart above plots the labelled rate, which is exact but only
+                defined for generated data; on live traffic the only honest
+                signal is a member disputing a block and an operator upholding
+                it. Both figures belong here so neither reads as the whole
+                story -- and an unreviewed queue is work, not a metric, so it
+                is stated separately rather than folded into the rate. */}
+            {(overview?.reported_false_blocks > 0 ||
+              overview?.block_reports_awaiting_review > 0) && (
+              <Stack
+                direction="row"
+                spacing={2}
+                sx={(theme) => ({
+                  mt: 1.5,
+                  pt: 1.5,
+                  borderTop: `1px solid ${theme.vars.palette.divider}`,
+                  flexWrap: 'wrap',
+                  rowGap: 1,
+                })}
+              >
+                <Stack direction="row" spacing={0.75} alignItems="center">
+                  <IconifyIcon
+                    icon="material-symbols:person-raised-hand-rounded"
+                    sx={{ fontSize: 16, color: 'error.main' }}
+                  />
+                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                    <Mono variant="monoCaption" sx={{ fontWeight: 600, color: 'error.main' }}>
+                      {overview.reported_false_blocks}
+                    </Mono>{' '}
+                    confirmed wrong by an operator, of{' '}
+                    <Mono variant="monoCaption">{overview.blocks_in_window}</Mono> blocks
+                  </Typography>
+                </Stack>
+                {overview.block_reports_awaiting_review > 0 && (
+                  <Stack direction="row" spacing={0.75} alignItems="center">
+                    <IconifyIcon
+                      icon="material-symbols:pending-outline-rounded"
+                      sx={{ fontSize: 16, color: 'warning.main' }}
+                    />
+                    <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                      <Mono variant="monoCaption" sx={{ fontWeight: 600, color: 'warning.main' }}>
+                        {overview.block_reports_awaiting_review}
+                      </Mono>{' '}
+                      member {overview.block_reports_awaiting_review === 1 ? 'report' : 'reports'}{' '}
+                      awaiting review
+                    </Typography>
+                  </Stack>
+                )}
+              </Stack>
+            )}
           </Paper>
         </Grid>
 
@@ -337,7 +393,11 @@ const FleetOverview = () => {
                 Exposure by operator
               </Typography>
               <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                Value approved in the last 24 hours.
+                {/* Follows the tile window rather than claiming 24 hours. The
+                    panel already respected the selector; only its caption
+                    did not, so switching to 30d produced a chart that
+                    misdescribed its own contents. */}
+                Value approved in the {windowLabel}.
               </Typography>
             </Stack>
             {(overview?.exposure_by_operator ?? []).length === 0 ? (
