@@ -39,6 +39,7 @@ export const endpoints = {
   policy: '/policy',
   simulate: '/policy/simulate',
   promote: '/policy/promote',
+  deletePolicy: (policyId) => `/policy/${policyId}`,
 
   // incidents & disputes
   incidents: '/incidents',

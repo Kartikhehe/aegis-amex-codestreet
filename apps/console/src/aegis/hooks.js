@@ -6,6 +6,7 @@
  * shape means the Bearer interceptor, error normalisation and cache keys all
  * behave exactly as they do elsewhere in the app.
  */
+import { useCallback, useState } from 'react';
 import axiosFetcher from 'services/axios/axiosFetcher';
 import useSWR, { useSWRConfig } from 'swr';
 import useSWRMutation from 'swr/mutation';
@@ -127,6 +128,34 @@ export const useCreatePolicy = () =>
 
 export const usePromotePolicy = () =>
   useSWRMutation([endpoints.promote, { method: 'post' }], axiosFetcher);
+
+// Deletion is a plain call rather than a useSWRMutation, and returns the
+// revalidated policy list.
+//
+// As a mutation it keyed on '/policy', which SWR treats as the same cache slot
+// family as the '/policies' list this page renders: the DELETE and the refetch
+// both fired, and the list still showed the deleted row. Calling the endpoint
+// directly and then revalidating the one key we care about keeps the mutation
+// out of the cache entirely, so there is nothing to collide with.
+export const useDeletePolicy = () => {
+  const { mutate } = useSWRConfig();
+  const [isMutating, setIsMutating] = useState(false);
+
+  const trigger = useCallback(
+    async (policyId) => {
+      setIsMutating(true);
+      try {
+        await axiosFetcher([endpoints.deletePolicy(policyId), { method: 'delete' }]);
+        await mutate([endpoints.policies]);
+      } finally {
+        setIsMutating(false);
+      }
+    },
+    [mutate],
+  );
+
+  return { trigger, isMutating };
+};
 
 // ---------------------------------------------------------------------------
 // Incidents & disputes

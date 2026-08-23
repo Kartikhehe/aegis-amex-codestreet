@@ -581,8 +581,13 @@ BLOCK_REPORT_RATE: dict[str, float] = {
     "amount_above_ceiling": 0.30,          # "I meant to spend that much"
     "velocity_limit": 0.22,                # "it was a busy day, all mine"
     "novel_merchant": 0.18,
-    "conformance_below_deny_floor": 0.12,  # sometimes a fair stop, sometimes a
-                                           # scorer that misread the purpose
+    "conformance_below_deny_floor": 0.40,  # the most-disputed stop after
+                                           # ship-to: the scorer misreading a
+                                           # purpose feels arbitrary to the
+                                           # member, and this is the one rule
+                                           # an operator can actually retune,
+                                           # so its disputes are the ones a
+                                           # policy change can resolve
     "prohibited_attribute_veto": 0.04,     # rarely disputed: the member set
                                            # the prohibition themselves
     "suspected_injection": 0.01,           # essentially never: the evidence is

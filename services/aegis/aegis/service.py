@@ -649,6 +649,17 @@ def revoke_agent(session: Session, agent_id: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+# How restrictive each verdict is, for comparing a candidate against what is
+# deployed. ALLOW lets the purchase through; STEP_UP asks a person, which is
+# friction but not a refusal; DENY and HOLD stop it outright.
+#
+# Ordering these lets the simulator report movement in both directions. A
+# change from DENY to STEP_UP is a genuine loosening -- the member now gets
+# asked rather than refused -- and it is invisible to any comparison that only
+# looks for ALLOW.
+_VERDICT_SEVERITY = {"ALLOW": 0, "STEP_UP": 1, "HOLD": 2, "DENY": 3}
+
+
 def simulate_policy(
     session: Session,
     candidate: Ruleset,
@@ -731,9 +742,20 @@ def simulate_policy(
         if after.verdict.value == "ALLOW":
             exposure_after += action.amount
 
-        if before.verdict.value == "ALLOW" and after.verdict.value != "ALLOW":
+        # Classify by whether the outcome got HARDER or SOFTER, not by whether
+        # it became exactly ALLOW.
+        #
+        # Comparing against ALLOW alone missed the most common useful change a
+        # policy makes. Relaxing the deny floor turns a flat refusal into a
+        # step-up -- the member is asked instead of refused -- and the old
+        # comparison recorded that as no change whatsoever, so a candidate that
+        # cleared four confirmed false blocks reported a blast radius of zero.
+        # Ranking the verdicts makes both directions visible.
+        before_rank = _VERDICT_SEVERITY.get(before.verdict.value, 0)
+        after_rank = _VERDICT_SEVERITY.get(after.verdict.value, 0)
+        if after_rank > before_rank:
             newly_blocked.append(_delta_row(row, before, after))
-        elif before.verdict.value != "ALLOW" and after.verdict.value == "ALLOW":
+        elif after_rank < before_rank:
             newly_allowed.append(_delta_row(row, before, after))
 
     return {
@@ -748,10 +770,98 @@ def simulate_policy(
         "newly_allowed_count": len(newly_allowed),
         "newly_blocked": newly_blocked[:100],
         "newly_allowed": newly_allowed[:100],
+        "impact": _impact_summary(newly_blocked, newly_allowed),
+    }
+
+
+def _impact_summary(
+    newly_blocked: list[dict[str, Any]], newly_allowed: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Whether a candidate policy trades in the right direction.
+
+    Two counts -- how many more get blocked, how many more get through -- do
+    not say whether a change is an improvement. The question is which KIND of
+    traffic moves: blocking fraud is the point, blocking a member's real
+    groceries is the cost, and letting known-bad traffic through is a
+    regression however good the totals look.
+
+    Computed over the full lists rather than the truncated preview, so the
+    summary describes the whole replay even when the tables show the first 100.
+    """
+
+    def tally(rows: list[dict[str, Any]]) -> dict[str, int]:
+        out = {
+            "catches_bad_traffic": 0,
+            "harms_good_traffic": 0,
+            "disputed_unreviewed": 0,
+            "unknown": 0,
+        }
+        for row in rows:
+            out[row["judgement"]] = out.get(row["judgement"], 0) + 1
+        return out
+
+    blocked = tally(newly_blocked)
+    allowed = tally(newly_allowed)
+
+    # Blocks the member already disputed AND an operator upheld. A candidate
+    # that clears these is fixing known mistakes, which is the strongest
+    # argument any policy change can have.
+    false_blocks_resolved = sum(
+        1
+        for row in newly_allowed
+        if row["block_report"] == "wrong" and row["block_report_confirmed"] is True
+    )
+    disputes_resolved = sum(1 for row in newly_allowed if row["block_report"] == "wrong")
+
+    return {
+        "newly_blocked_by_judgement": blocked,
+        "newly_allowed_by_judgement": allowed,
+        # The trade, stated plainly.
+        "bad_traffic_newly_caught": blocked["catches_bad_traffic"],
+        "good_traffic_newly_harmed": blocked["harms_good_traffic"],
+        "bad_traffic_newly_released": allowed["catches_bad_traffic"],
+        "good_traffic_newly_released": allowed["harms_good_traffic"],
+        "false_blocks_resolved": false_blocks_resolved,
+        "disputes_resolved": disputes_resolved,
+        "unlabelled": blocked["unknown"] + allowed["unknown"],
     }
 
 
 def _delta_row(row: DecisionRow, before: Decision, after: Decision) -> dict[str, Any]:
+    """One changed decision, with enough context to judge whether the change is good.
+
+    A count of what a policy would newly block is not reviewable on its own:
+    blocking fraud and blocking a card member's legitimate groceries both
+    increment the same number. So every changed row carries whatever evidence
+    exists about whether the purchase was actually wanted:
+
+      * `legitimate` -- the seed's ground-truth label, exact but only present
+        for generated traffic.
+      * `block_report` / `block_report_confirmed` -- what a member said about
+        the original block and whether an operator upheld it. The only honest
+        signal for real traffic, and it deliberately takes two people.
+
+    `judgement` folds those into the single question a reviewer is actually
+    asking: would this change stop something that should be stopped, or stop
+    something a person already told us they wanted? Rows with no evidence are
+    "unknown" rather than assumed good -- that distinction is the difference
+    between a review and a rubber stamp.
+    """
+    legitimate = row.seed_legitimate
+    reported = row.block_report == "wrong"
+    confirmed = row.block_report_confirmed
+
+    if legitimate is True:
+        judgement = "harms_good_traffic"
+    elif legitimate is False:
+        judgement = "catches_bad_traffic"
+    elif reported and confirmed is True:
+        judgement = "harms_good_traffic"
+    elif reported and confirmed is None:
+        judgement = "disputed_unreviewed"
+    else:
+        judgement = "unknown"
+
     return {
         "action_id": row.action_id,
         "agent_id": row.agent_id,
@@ -766,4 +876,14 @@ def _delta_row(row: DecisionRow, before: Decision, after: Decision) -> dict[str,
         "after_verdict": after.verdict.value,
         "after_reason_code": after.reason_code.value,
         "after_rule": after.winning_rule,
+        # Why the original decision went the way it did, so a reviewer can see
+        # which rule they are about to override.
+        "before_reason_code": before.reason_code.value,
+        "before_rule": before.winning_rule,
+        "description": row.description or "",
+        # Evidence about whether this purchase was actually wanted.
+        "legitimate": legitimate,
+        "block_report": row.block_report,
+        "block_report_confirmed": confirmed,
+        "judgement": judgement,
     }

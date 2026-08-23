@@ -866,6 +866,61 @@ def promote(payload: s.PromoteRequest, db: DbSession) -> s.PolicyOut:
     return s.PolicyOut.model_validate(row)
 
 
+@router.delete(
+    "/policy/{policy_id}",
+    status_code=204,
+    tags=["policy"],
+    dependencies=[Depends(require_roles(Role.OPERATOR))],
+)
+def delete_policy(policy_id: str, db: DbSession) -> Response:
+    """Discard a policy version.
+
+    Only a DRAFT can be deleted, and this is a real constraint rather than a
+    conservative default. A shadow policy is being observed right now, and an
+    enforcing policy is the ruleset that every decision made under it points
+    back to -- its hash is recorded on those decisions and in the ledger. Delete
+    it and the audit trail says a purchase was judged by a ruleset that no
+    longer exists, which is precisely the question a dispute has to answer.
+
+    So drafts, which nothing has been decided under, are disposable. Anything
+    that has ever been live is not; demote it to draft first, which is an
+    explicit act that leaves the promotion history intact.
+    """
+    row = db.get(PolicyVersion, policy_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Policy not found")
+
+    if row.stage != "draft":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"This policy is {row.stage}, so it cannot be deleted. Decisions "
+                "reference the ruleset that judged them; removing it would leave "
+                "those records pointing at nothing. Demote it to draft first."
+            ),
+        )
+
+    # A draft that was previously promoted has decisions attributed to its hash
+    # from that period, so it is history too -- even though it is a draft now.
+    decided_under = db.scalar(
+        select(func.count(DecisionRow.action_id)).where(
+            DecisionRow.ruleset_hash == row.ruleset_hash
+        )
+    )
+    if decided_under:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{decided_under:,} decisions were made under this ruleset, so it "
+                "is part of the audit trail and cannot be deleted."
+            ),
+        )
+
+    db.delete(row)
+    db.commit()
+    return Response(status_code=204)
+
+
 def _next_version(db) -> int:
     return int(db.scalar(select(func.coalesce(func.max(PolicyVersion.version), 0))) or 0) + 1
 

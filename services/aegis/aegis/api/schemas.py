@@ -415,6 +415,15 @@ class SimulateResponse(ApiModel):
     newly_blocked: list[dict[str, Any]]
     newly_allowed: list[dict[str, Any]]
 
+    impact: dict[str, Any] = Field(default_factory=dict)
+    """Which KIND of traffic moves, not just how much.
+
+    The counts alone cannot distinguish blocking fraud from blocking a card
+    member's real groceries. This breaks the change down by whether each
+    affected purchase was actually wanted, and is computed over the whole
+    replay rather than the truncated row previews above.
+    """
+
 
 class PromoteRequest(ApiModel):
     policy_id: str
